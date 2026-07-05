@@ -1,22 +1,23 @@
 import json
-from typing import Callable
-
 from docx import Document
+from pydantic import BaseModel, Field
+
+
+class ReadReportArgs(BaseModel):
+    file_name: str = Field(..., description="仅文件名，例如 summary.md。")
+    folder: str = Field(..., description="已授权目录（必须与当前会话授权目录一致）。")
 
 
 def read_report(
     file_name: str,
     folder: str,
-    *,
-    resolve_scoped_path: Callable[[str, str], object],
-    scoped_path_denied_text: str,
-    ensure_supported_read_extension: Callable[[object], str],
 ) -> str:
+    from ..shared.pathing import ensure_supported_read_extension, resolve_scoped_path, SCOPED_PATH_DENIED_TEXT
     target_path = resolve_scoped_path(folder, file_name)
     if not target_path.exists():
         raise FileNotFoundError(f"文件不存在：{target_path.name}")
     if not target_path.is_file():
-        raise PermissionError(scoped_path_denied_text)
+        raise PermissionError(SCOPED_PATH_DENIED_TEXT)
 
     ext = ensure_supported_read_extension(target_path)
     if ext == ".md":
