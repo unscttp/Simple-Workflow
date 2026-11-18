@@ -1,0 +1,4 @@
+[submodule "third_party/nlg"]
+	path = third_party/nlg
+	url = https://github.com/unscttp/nlg
+	branch = claude/awesome-davinci-tgmalm

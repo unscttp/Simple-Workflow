@@ -1,0 +1,35 @@
+{
+  "id": "chat-turn",
+  "name": "One chat turn",
+  "description": "Answer one user message with tools, knowledge and human approvals.",
+  "start": [
+    "assistant"
+  ],
+  "edges": [],
+  "nodes": [
+    {
+      "id": "assistant",
+      "type": "assistant",
+      "inputs": {
+        "message": "/message",
+        "conversation": "/conversation",
+        "workspace": "/workspace"
+      },
+      "outputs": {
+        "answer": "/answer"
+      },
+      "react": {
+        "max_steps": 12
+      },
+      "allowance": "risk-medium",
+      "knowledge": {
+        "read": [
+          "assistant"
+        ],
+        "propose": [
+          "assistant"
+        ]
+      }
+    }
+  ]
+}

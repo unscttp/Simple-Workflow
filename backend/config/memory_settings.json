@@ -1,0 +1,15 @@
+{
+  "react_rounds": 5,
+  "token_limit": 8192,
+  "prompt_max_events": 40,
+  "prompt_max_value_chars": 800,
+  "prompt_budget_chars": 12000,
+  "prompt_knowledge_chars": 4000,
+  "knowledge_human_review": true,
+  "knowledge_consolidate_on_finish": true,
+  "knowledge_max_proposals_per_task": 3,
+  "graph_max_depth": 0,
+  "graph_creation_human_check": true,
+  "graph_save_human_check": true,
+  "graph_max_steps": 100
+}

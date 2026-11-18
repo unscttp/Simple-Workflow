@@ -2,3 +2,6 @@ frontend/node_modules/
 frontend/.next/
 __pycache__/
 *.pyc
+.venv/
+# Sessions, saved turns and the knowledge base (SW_DATA_DIR)
+data/

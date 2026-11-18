@@ -1,0 +1,22 @@
+{
+  "id": "risk-medium",
+  "description": "Everything in low, plus saving and editing reports and proposing knowledge.",
+  "actions": [
+    "tool:web.search",
+    "tool:data.analyze_trend",
+    "tool:text.keywords",
+    "tool:text.redact",
+    "tool:workspace.request_access",
+    "tool:reports.list",
+    "tool:reports.read",
+    "tool:reports.save",
+    "tool:reports.edit",
+    "tool:reports.delete",
+    "tool:knowledge.list",
+    "tool:knowledge.read",
+    "tool:knowledge.search",
+    "tool:knowledge.propose"
+  ],
+  "max_tool_risk": "medium",
+  "config": {}
+}

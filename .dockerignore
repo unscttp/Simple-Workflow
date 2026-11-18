@@ -1,6 +1,7 @@
-.git
-.gitignore
+**/.git
 **/__pycache__
 **/*.pyc
+data/
 frontend/node_modules
 frontend/.next
+third_party/nlg/tests
