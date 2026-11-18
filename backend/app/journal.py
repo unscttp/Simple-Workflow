@@ -27,8 +27,14 @@ def _output(value) -> str:
 
 
 def tool_logs(task: Task) -> list[dict]:
-    """One entry per tool call of the turn, in order."""
+    """One entry per tool call of the turn, in order.
+
+    A call that paused for approval keeps its own entry, marked approved or
+    rejected once the user decides; an approved call then appears again as the
+    call that actually ran.
+    """
     calls: dict[str, dict] = {}
+    waiting: dict[str, dict] = {}
     for event in task.events:
         kind, details = event["type"], event["details"]
         if kind == "tool.requested":
@@ -59,6 +65,13 @@ def tool_logs(task: Task) -> list[dict]:
                 call.update(status="failed", output=f"{details['error_type']}: {details['error']}")
             else:
                 call.update(status="waiting", output="Waiting for the user's approval.")
+                waiting[details.get("request_id")] = call
+        elif kind == "approval.resolved" and details.get("request_id") in waiting:
+            approved = details.get("approved")
+            waiting.pop(details["request_id"]).update(
+                status="approved" if approved else "rejected",
+                output=f"{'Approved' if approved else 'Rejected'} by the user.",
+            )
     return list(calls.values())
 
 

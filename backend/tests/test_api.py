@@ -92,6 +92,15 @@ class ApprovalTests(ApiCase):
         )
         self.assertEqual(turn["status"], "completed")
         self.assertEqual(turn["session"]["workspace"], str(self.reports.resolve()))
+        statuses = [(log["tool_name"], log["status"]) for log in turn["tool_logs"]]
+        self.assertEqual(
+            statuses,
+            [
+                ("workspace.request_access", "approved"),
+                ("workspace.request_access", "completed"),
+                ("reports.save", "completed"),
+            ],
+        )
         (saved,) = list(self.reports.glob("*.md"))
         self.assertIn("Agent 正在普及。", saved.read_text("utf-8"))
         audit = [entry["type"] for entry in turn["audit_entries"]]
@@ -120,6 +129,7 @@ class ApprovalTests(ApiCase):
         self.assertEqual(turn["pending_approvals"][0]["risk_level"], "high")
         turn = self.decide(turn["pending_approvals"][0]["id"], False)
         self.assertEqual(turn["status"], "failed")
+        self.assertEqual(turn["tool_logs"][-1]["status"], "rejected")
         self.assertIn("拒绝", turn["answer"])
         self.assertTrue((self.reports / "old.md").exists())
         self.assertEqual(self.send("继续", answer("好的"))["status"], "completed")
