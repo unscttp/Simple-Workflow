@@ -1,6 +1,4 @@
-/// <reference types="next" />
+﻿/// <reference types="next" />
 /// <reference types="next/image-types/global" />
-/// <reference path="./.next/types/routes.d.ts" />
 
-// NOTE: This file should not be edited
-// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+// 此文件由 Next.js 约定使用，请勿手动删除。

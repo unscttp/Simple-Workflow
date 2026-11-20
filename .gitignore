@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 # Sessions, saved turns and the knowledge base (SW_DATA_DIR)
 data/
+*.tsbuildinfo
