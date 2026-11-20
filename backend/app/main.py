@@ -12,13 +12,17 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from workflow_core import render_page
 
-from .agent import AgentService, ModelFactory, NoPendingTurn, TurnInProgress
-from .model import OpenAICompatibleModel
+from .agent import AgentService, ModelChoice, ModelFactory, NoPendingTurn, TurnInProgress
+from .providers import ModelError, create_model, list_models
 from .schemas import (
+    ApiKey,
     DecisionRequest,
     KnowledgeView,
     MessageRequest,
+    ModelList,
     ProposalDecision,
+    ProvidersView,
+    ProviderView,
     RiskLevelRequest,
     SessionView,
     TurnResponse,
@@ -30,23 +34,17 @@ from .tools.research import SearchFunction, duckduckgo_search
 KNOWLEDGE_REVIEWER = "web-user"
 
 
-def openai_compatible_factory(settings: Settings) -> ModelFactory:
-    def factory(api_key: str, model: str) -> OpenAICompatibleModel:
-        return OpenAICompatibleModel(api_key, model, settings.model_base_url)
-
-    return factory
-
-
 def create_app(
     settings: Settings | None = None,
-    model_factory: ModelFactory | None = None,
+    model_factory: ModelFactory = create_model,
     search: SearchFunction = duckduckgo_search,
+    model_lister=list_models,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
-    agent = AgentService(
-        settings, model_factory or openai_compatible_factory(settings), search=search
-    )
-    app = FastAPI(title="Simple Workflow assistant", version="2.0.0")
+    if settings.default_provider not in settings.providers:
+        raise ValueError(f"SW_DEFAULT_PROVIDER must be one of {sorted(settings.providers)}.")
+    agent = AgentService(settings, model_factory, search=search)
+    app = FastAPI(title="Simple Workflow assistant", version="2.1.0")
     app.state.agent = agent
     app.add_middleware(
         CORSMiddleware,
@@ -81,12 +79,39 @@ def create_app(
             raise HTTPException(409, str(exc))
         return TurnResponse(**asdict(result), session=session_view(session_id))
 
-    def model_name(request) -> str:
-        return request.model or settings.default_model
+    def choice(request) -> ModelChoice:
+        return ModelChoice(
+            provider=request.provider or settings.default_provider,
+            api_key=request.api_key,
+            model=request.model,
+        )
 
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok"}
+
+    @app.get("/api/providers", response_model=ProvidersView)
+    def providers() -> ProvidersView:
+        return ProvidersView(
+            default=settings.default_provider,
+            providers=[
+                ProviderView(
+                    id=p.id, label=p.label, default_model=p.default_model, key_hint=p.key_hint
+                )
+                for p in settings.providers.values()
+            ],
+        )
+
+    @app.post("/api/providers/{provider_id}/models", response_model=ModelList)
+    def provider_models(provider_id: str, body: ApiKey) -> ModelList:
+        provider = settings.providers.get(provider_id)
+        if provider is None:
+            raise HTTPException(404, "Unknown model provider.")
+        try:
+            models = model_lister(provider, body.api_key)
+        except ModelError as exc:
+            raise HTTPException(502, str(exc))
+        return ModelList(provider=provider_id, models=models)
 
     @app.post("/api/sessions", response_model=SessionView, status_code=201)
     def create_session() -> SessionView:
@@ -116,7 +141,7 @@ def create_app(
     def send_message(session_id: str, body: MessageRequest) -> TurnResponse:
         return turn(
             session_id,
-            lambda: agent.send_message(session_id, body.message, body.api_key, model_name(body)),
+            lambda: agent.send_message(session_id, body.message, choice(body)),
         )
 
     @app.post("/api/sessions/{session_id}/approvals/{request_id}", response_model=TurnResponse)
@@ -127,8 +152,7 @@ def create_app(
                 session_id,
                 request_id,
                 body.approved,
-                body.api_key,
-                model_name(body),
+                choice(body),
                 body.comment,
             ),
         )

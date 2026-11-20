@@ -5,11 +5,34 @@ export const API_BASE_URL =
 
 export type RiskLevel = "low" | "medium" | "high";
 
+export type ProviderId = "deepseek" | "anthropic" | "openai" | "gemini";
+
+export type Provider = {
+  id: ProviderId;
+  label: string;
+  default_model: string;
+  key_hint: string;
+};
+
+export type Providers = { default: ProviderId; providers: Provider[] };
+
+// The model a request runs on. The key is sent with each request and never stored by the backend.
+export type ModelChoice = { provider: ProviderId; api_key: string; model?: string };
+
+export type TurnStats = {
+  models: { provider: string; model: string }[];
+  decisions: number;
+  tokens: number;
+  tokens_estimated: boolean;
+  tool_calls: number;
+};
+
 export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   task_id?: string | null;
   at?: string | null;
+  model?: string | null; // "provider/model" that wrote an assistant message
 };
 
 export type Approval = {
@@ -53,6 +76,7 @@ export type Turn = {
   tool_logs: ToolLog[];
   audit_entries: AuditEntry[];
   pending_approvals: Approval[];
+  stats: TurnStats;
   session: Session;
 };
 
@@ -114,15 +138,21 @@ export const api = {
     request<Session>(`/api/sessions/${id}/risk-level`, { method: "PUT", body: json({ risk_level }) }),
   revokeWorkspace: (id: string) =>
     request<Session>(`/api/sessions/${id}/workspace`, { method: "DELETE" }),
-  sendMessage: (id: string, api_key: string, message: string) =>
+  providers: () => request<Providers>("/api/providers"),
+  models: (provider: ProviderId, api_key: string) =>
+    request<{ provider: ProviderId; models: string[] }>(`/api/providers/${provider}/models`, {
+      method: "POST",
+      body: json({ api_key }),
+    }),
+  sendMessage: (id: string, choice: ModelChoice, message: string) =>
     request<Turn>(`/api/sessions/${id}/messages`, {
       method: "POST",
-      body: json({ api_key, message }),
+      body: json({ ...choice, message }),
     }),
-  decide: (id: string, requestId: string, api_key: string, approved: boolean, comment: string) =>
+  decide: (id: string, requestId: string, choice: ModelChoice, approved: boolean, comment: string) =>
     request<Turn>(`/api/sessions/${id}/approvals/${requestId}`, {
       method: "POST",
-      body: json({ api_key, approved, comment }),
+      body: json({ ...choice, approved, comment }),
     }),
   knowledge: () => request<Knowledge>("/api/knowledge"),
   knowledgePage: (page: string) =>

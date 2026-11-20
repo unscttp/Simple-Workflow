@@ -10,51 +10,58 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.model import ModelReply, ToolCall
+from app.providers.base import Reply, ToolCall
 from app.settings import Settings
 
 API_KEY = "sk-test-secret-key-0000"
 
 
-def call(name: str, **arguments) -> ModelReply:
-    return ModelReply(tool_calls=[ToolCall(name, arguments)], total_tokens=10)
+def call(name: str, **arguments) -> Reply:
+    return Reply(
+        tool_call=ToolCall(name, arguments), state={"call_id": f"call-{name}"}, total_tokens=10
+    )
 
 
-def answer(text: str) -> ModelReply:
-    return ModelReply(text=text, total_tokens=10)
+def answer(text: str) -> Reply:
+    return Reply(text=text, total_tokens=10)
+
+
+def last_result(turn) -> dict:
+    """The observation of the most recent step of a turn."""
+    return json.loads(turn.steps[-1].output)
 
 
 class ScriptedModel:
-    """Plays chat replies in order. Each step is a reply or ``(messages, tools) -> reply``."""
+    """Plays replies in order. Each step is a ``Reply`` or ``turn -> Reply``."""
+
+    provider = "scripted"
+    model = "scripted-model"
 
     def __init__(self) -> None:
         self.steps: list = []
-        self.json_replies: list = []
-        self.requests: list[tuple[list[dict], list[dict]]] = []
+        self.turns: list = []
+        self.json_requests: list[tuple[str, str, dict]] = []
+        self.json_reply = lambda system, user: {"operations": [], "rationale": "", "evidence": []}
 
-    def complete(self, messages, tools):
-        self.requests.append((messages, tools))
+    def decide(self, turn):
+        self.turns.append(turn)
         if not self.steps:
             raise AssertionError("The scripted model ran out of replies.")
         step = self.steps.pop(0)
-        return step(messages, tools) if callable(step) else step
+        return step(turn) if callable(step) else step
 
-    def complete_json(self, messages):
-        self.requests.append((messages, []))
-        return self.json_replies.pop(0) if self.json_replies else {"operations": []}
+    def complete_json(self, system, user, schema):
+        self.json_requests.append((system, user, schema))
+        return self.json_reply(system, user)
 
     # -- helpers for assertions -------------------------------------------
 
-    def tool_names(self, request: int = -1) -> list[str]:
-        return [tool["function"]["name"] for tool in self.requests[request][1]]
+    def tool_names(self, turn: int = -1) -> list[str]:
+        return [tool.name for tool in self.turns[turn].tools]
 
-    def context(self, request: int = -1) -> dict:
-        system = self.requests[request][0][0]["content"]
-        return json.loads(system[system.index("{") :])
-
-    def last_tool_result(self, request: int = -1) -> dict:
-        tool_messages = [m for m in self.requests[request][0] if m["role"] == "tool"]
-        return json.loads(tool_messages[-1]["content"])
+    def context(self, turn: int = -1) -> dict:
+        message = self.turns[turn].message
+        return json.loads(message[message.index("\n{") + 1 :])
 
 
 class SearchStub:
@@ -78,6 +85,7 @@ class ApiCase(unittest.TestCase):
         self.root = Path(temporary.name)
         self.reports = self.root / "reports"
         self.model = ScriptedModel()
+        self.factory_calls: list[tuple[str, str, str]] = []
         self.search = SearchStub()
         settings = Settings(
             data_dir=self.root / "data",
@@ -85,16 +93,23 @@ class ApiCase(unittest.TestCase):
             cors_origins=["http://testserver"],
         )
         self.app = create_app(
-            settings, model_factory=lambda key, name: self.model, search=self.search
+            settings,
+            model_factory=self.factory,
+            search=self.search,
+            model_lister=lambda provider, key: [f"{provider.id}-model-a", f"{provider.id}-model-b"],
         )
         self.client = TestClient(self.app)
         self.session = self.client.post("/api/sessions").json()
 
-    def send(self, message: str, *steps, status: int = 200) -> dict:
+    def factory(self, provider, api_key, model):
+        self.factory_calls.append((provider.id, api_key, model))
+        return self.model
+
+    def send(self, message: str, *steps, status: int = 200, **choice) -> dict:
         self.model.steps.extend(steps)
         response = self.client.post(
             f"/api/sessions/{self.session['id']}/messages",
-            json={"api_key": API_KEY, "message": message},
+            json={"api_key": API_KEY, "message": message, **choice},
         )
         self.assertEqual(response.status_code, status, response.text)
         return response.json()

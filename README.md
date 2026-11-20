@@ -13,6 +13,7 @@ real application and is where framework gaps are found.
 - [How it works](#how-it-works)
 - [Getting started](#getting-started)
 - [Configuration](#configuration)
+- [Model providers](#model-providers)
 - [Permissions and approvals](#permissions-and-approvals)
 - [Tools](#tools)
 - [Long-term knowledge](#long-term-knowledge)
@@ -29,7 +30,7 @@ real application and is where framework gaps are found.
 frontend (Next.js) ──HTTP──> backend (FastAPI)
                                └─ AgentService
                                    ├─ one NLG task per chat message ("chat-turn" workflow)
-                                   ├─ model adapter ── DeepSeek / OpenAI-compatible API
+                                   ├─ model adapter ── DeepSeek / Claude / GPT / Gemini
                                    ├─ tools: web, data, text, reports
                                    ├─ allowances: risk-low / risk-medium / risk-high
                                    └─ knowledge store (reviewed, shared across chats)
@@ -39,8 +40,12 @@ frontend (Next.js) ──HTTP──> backend (FastAPI)
   (`backend/config/workflow.json`): a single LLM node that may call tools in a
   loop and then answers.
 - The model is called with native tool calling. The adapter
-  (`backend/app/model.py`) turns the framework's prompt into chat messages
-  and tool definitions, and the model's reply into a tool call or the answer.
+  (`backend/app/model.py`) turns the framework's prompt into a
+  provider-neutral turn (chat messages, tool definitions, earlier tool calls
+  and results); each provider in `backend/app/providers/` sends it in its own
+  API's format and turns the reply into a tool call or the answer.
+- You choose the provider and model for every message, so the same
+  conversation can be continued on another model.
 - When a tool needs your approval, the turn pauses. The interface shows what
   would happen; the turn continues after you allow it, or ends if you reject it.
 - Each finished turn is saved with its full journal under `SW_DATA_DIR`.
@@ -61,7 +66,8 @@ In an existing clone, fetch it with `git submodule update --init`.
 docker compose up --build
 ```
 
-Open `http://localhost:3000`, paste your DeepSeek API key and start chatting.
+Open `http://localhost:3000`, choose a model provider, paste its API key and
+start chatting.
 Ports are set with `FRONTEND_PORT` (default 3000) and `BACKEND_PORT` (default
 8000). Data, including report folders, is kept in the `sw-data` volume; in
 Docker, report folders must be inside `/data/reports`.
@@ -99,8 +105,9 @@ Backend settings are environment variables:
 | --- | --- | --- |
 | `SW_DATA_DIR` | `./data` | Sessions, saved turns and the knowledge base |
 | `SW_REPORTS_ROOT` | unset | If set, report folders can only be approved inside it |
-| `SW_MODEL_BASE_URL` | `https://api.deepseek.com` | Any OpenAI-compatible chat endpoint |
-| `SW_DEFAULT_MODEL` | `deepseek-chat` | Model used when a request names none |
+| `SW_DEFAULT_PROVIDER` | `deepseek` | Provider used when a request names none: `deepseek`, `anthropic`, `openai` or `gemini` |
+| `SW_<PROVIDER>_MODEL` | see [Model providers](#model-providers) | Model used when a request names none, e.g. `SW_ANTHROPIC_MODEL` |
+| `SW_<PROVIDER>_BASE_URL` | the provider's API | Another endpoint for that provider's API, e.g. a proxy |
 | `SW_DEFAULT_RISK_LEVEL` | `medium` | Risk level of new sessions |
 | `SW_KNOWLEDGE_CONSOLIDATION` | `true` | After each turn, ask the model what is worth remembering (one extra model call) |
 | `SW_HISTORY_MESSAGES` | `20` | Earlier chat messages sent with each turn |
@@ -108,6 +115,51 @@ Backend settings are environment variables:
 
 Framework settings for this app (prompt size budgets, knowledge review, limits)
 are in `backend/config/memory_settings.json`; see the NLG README for each key.
+
+## Model providers
+
+| Provider | `provider` | API | Default model |
+| --- | --- | --- | --- |
+| DeepSeek | `deepseek` | Chat Completions (`openai` SDK) | `deepseek-chat` |
+| Claude | `anthropic` | Messages (`anthropic` SDK) | `claude-opus-5-5` |
+| GPT | `openai` | Responses (`openai` SDK) | `gpt-5.5` |
+| Gemini | `gemini` | Google's OpenAI-compatible Chat Completions endpoint (`openai` SDK) | `gemini-3.8-flash` |
+
+The interface keeps one API key and one model per provider in the browser.
+"Load available models" asks the provider which models the key can use
+(`POST /api/providers/{provider}/models`); any model ID can also be typed in.
+Check the default model IDs against your provider before relying on them, and
+override them with `SW_<PROVIDER>_MODEL` if needed.
+
+How each provider continues after a tool call within one turn:
+
+- **Claude**: the full assistant content of each tool call, thinking blocks
+  included, is sent back unchanged, so the model keeps its reasoning between
+  tool calls. Thinking runs with the model's defaults (adaptive on current
+  models). On models that support server-side refusal fallbacks
+  (`claude-fable-5-2`, `claude-fable-5-1`, `claude-opus-5-5`, `claude-opus-5`,
+  `claude-sonnet-5-5`), requests enable them (`fallbacks: "default"`): if the
+  model declines a request, the API may answer it with a fallback model within
+  the same call. A request that is still declined fails the turn with the
+  refusal category. The prompt prefix is cached automatically; knowledge
+  consolidation uses structured output.
+- **GPT**: requests are stateless (`store: false`); the encrypted reasoning
+  items and the function call of each step are sent back on the next request.
+- **Gemini**: each tool call carries a thought signature, which Gemini requires
+  in later requests of the turn; it is stored with the step and sent back.
+- **DeepSeek**: `reasoning_content` of thinking models is sent back with the
+  tool call of the same turn.
+
+This state is stored with each step in the NLG journal (`model_state` of the
+framework's ReAct history) and is never shown to the model as text. Reasoning
+state is bound to the model and the exact earlier requests, so it is replayed
+only while the turn's model, system prompt and tools are unchanged and no
+steps were left out of the prompt. Otherwise, for example when a different
+model is chosen while approving a tool call, plain tool calls and results are
+sent instead.
+
+Every provider is asked for one tool call per step (NLG runs one action per
+decision).
 
 ## Permissions and approvals
 
@@ -170,25 +222,29 @@ model can read from, and any change can be reverted through the API.
 | Method and path | Purpose |
 | --- | --- |
 | `GET /health` | Liveness check |
+| `GET /api/providers` | Providers, their default models and the default provider |
+| `POST /api/providers/{provider}/models` | Model IDs the key can use `{api_key}` |
 | `POST /api/sessions` | Create a session |
 | `GET /api/sessions/{id}` | Session: risk level, folder, messages, pending approvals |
 | `PUT /api/sessions/{id}/risk-level` | Set the risk level `{risk_level}` |
 | `DELETE /api/sessions/{id}/workspace` | Revoke the report folder |
-| `POST /api/sessions/{id}/messages` | Run a turn `{api_key, message, model?}` |
-| `POST /api/sessions/{id}/approvals/{request_id}` | Decide `{api_key, approved, comment?, model?}` and continue the turn |
+| `POST /api/sessions/{id}/messages` | Run a turn `{api_key, message, provider?, model?}` |
+| `POST /api/sessions/{id}/approvals/{request_id}` | Decide `{api_key, approved, comment?, provider?, model?}` and continue the turn |
 | `GET /api/knowledge` | Knowledge pages and pending proposals |
 | `GET /api/knowledge/pages/{scope}/{slug}` | Read one page |
 | `POST /api/knowledge/proposals/{id}` | Accept or reject `{approved, comment?}` |
 | `POST /api/knowledge/changes/{id}/revert` | Undo an applied change |
 
 A turn returns `status` (`completed`, `waiting` or `failed`), the `answer`,
-`tool_logs`, `audit_entries`, `pending_approvals` and the updated `session`.
+`tool_logs`, `audit_entries`, `pending_approvals`, `stats` (models used,
+model decisions, tokens and tool calls) and the updated `session`. Assistant
+messages record the `provider/model` that wrote them.
 While a turn waits for a decision, new messages are refused with HTTP 409.
 
 ## Data and privacy
 
-- Your API key is kept in the browser's local storage and sent with each
-  request. The backend uses it for that request only; it is never written to
+- Your API keys are kept in the browser's local storage and sent with each
+  request, only to the backend and only the key of the chosen provider. The backend uses it for that request only; it is never written to
   sessions, journals or logs, and model errors are reported without it.
 - `SW_DATA_DIR` holds sessions (messages, risk level, approved folder), every
   turn's journal (tool arguments and results) and the knowledge base.
@@ -209,14 +265,16 @@ ruff check . && ruff format --check .
 cd frontend && npx tsc --noEmit && npm run build
 ```
 
-The backend tests run offline: a scripted model replaces DeepSeek and a stub
-replaces web search.
+The backend tests run offline: a scripted model replaces the providers, a stub
+replaces web search, and each provider's request format is tested against
+fake SDK clients that return the SDKs' own response types.
 
 | Path | Contents |
 | --- | --- |
 | `backend/app/main.py` | FastAPI routes |
 | `backend/app/agent.py` | Turns as NLG tasks: engine setup, running, approvals |
-| `backend/app/model.py` | Model client and the adapters NLG calls |
+| `backend/app/model.py` | The adapters NLG calls, independent of the provider |
+| `backend/app/providers/` | One module per model API: Chat Completions, Responses, Messages |
 | `backend/app/tools/` | Tool definitions and handlers |
 | `backend/app/journal.py` | Tool logs, audit trail and approvals from a turn's journal |
 | `backend/app/sessions.py` | Session and turn storage |
@@ -249,7 +307,20 @@ Gaps found while porting and fixed in the framework:
   call per tool call);
 - the framework could not be installed with `pip install -e`;
 - knowledge consolidation did not see pending proposals, so consecutive turns
-  proposed the same page twice.
+  proposed the same page twice;
+- a ReAct action could not carry provider state (Gemini thought signatures,
+  Claude thinking blocks, GPT reasoning items) to the next decision, so Gemini
+  failed on its second tool call and the others lost their reasoning between
+  tool calls. Actions now have an opaque `model_state`.
+
+### Comparing models
+
+Each turn reports which models ran it, how many decisions and tool calls it
+took and how many tokens it used; the interface shows this under the message
+box, and every saved turn keeps it in `task.metadata["models"]` and its
+journal. To compare models, send the same task in fresh sessions with
+different providers, or switch the provider mid-conversation to see how
+another model continues from the same history.
 
 ## Changes from the previous version
 
@@ -273,5 +344,6 @@ Gaps found while porting and fixed in the framework:
   across processes.
 - The assistant calls one tool per step.
 - Web search depends on DuckDuckGo and can be rate-limited.
-- Tested offline with a scripted model; behaviour with a real model depends on
-  the model following the instructions in `system_prompt.md`.
+- Tested offline with a scripted model and fake provider clients; behaviour
+  with a real model depends on the model following the instructions in
+  `system_prompt.md`.

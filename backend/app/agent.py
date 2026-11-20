@@ -28,13 +28,14 @@ from workflow_core import (
 )
 
 from . import journal
-from .model import AgentAdapter, ChatModel, KnowledgeWriterAdapter
+from .model import AgentAdapter, KnowledgeWriterAdapter
+from .providers import ChatModel, Provider, create_model
 from .sessions import RISK_LEVELS, Session, SessionStore, now
 from .settings import CONFIG_DIR, PROMPT_FILE, Settings
 from .tools import TRUSTED_ACTIONS, build_tools
 from .tools.research import SearchFunction, duckduckgo_search
 
-ModelFactory = Callable[[str, str], ChatModel]
+ModelFactory = Callable[[Provider, str, str], ChatModel]
 NODE_TYPE = "assistant"
 REJECTED_NOTE = "（你拒绝了该操作，本轮任务已结束。）"
 
@@ -47,6 +48,15 @@ class NoPendingTurn(RuntimeError):
     """There is no paused turn to decide on."""
 
 
+@dataclass(frozen=True)
+class ModelChoice:
+    """The provider, key and model the user picked for one request."""
+
+    provider: str
+    api_key: str
+    model: str | None = None
+
+
 @dataclass
 class TurnResult:
     status: str  # completed / waiting / failed
@@ -56,13 +66,27 @@ class TurnResult:
     tool_logs: list[dict] = field(default_factory=list)
     audit_entries: list[dict] = field(default_factory=list)
     pending_approvals: list[dict] = field(default_factory=list)
+    # Which models ran the turn and what it took: decisions, tokens, tool calls.
+    stats: dict = field(default_factory=dict)
+
+
+def turn_stats(task: Task) -> dict:
+    decisions = [e["details"] for e in task.events if e["type"] == "llm.completed"]
+    return {
+        "models": task.metadata.get("models", []),
+        "decisions": len(decisions),
+        "tokens": sum(d.get("tokens", 0) for d in decisions),
+        "tokens_estimated": any(d.get("meter") == "estimated" for d in decisions),
+        # Finished calls: an approved call is requested again when the turn resumes.
+        "tool_calls": sum(e["type"] in {"tool.completed", "tool.failed"} for e in task.events),
+    }
 
 
 class AgentService:
     def __init__(
         self,
         settings: Settings,
-        model_factory: ModelFactory,
+        model_factory: ModelFactory = create_model,
         *,
         search: SearchFunction = duckduckgo_search,
     ) -> None:
@@ -140,12 +164,18 @@ class AgentService:
 
     # -- turns ---------------------------------------------------------------
 
-    def send_message(self, session_id: str, text: str, api_key: str, model_name: str) -> TurnResult:
+    def model(self, choice: ModelChoice) -> ChatModel:
+        provider = self.settings.providers.get(choice.provider)
+        if provider is None:
+            raise ValueError(f"Unknown model provider {choice.provider!r}.")
+        return self.model_factory(provider, choice.api_key, choice.model or provider.default_model)
+
+    def send_message(self, session_id: str, text: str, choice: ModelChoice) -> TurnResult:
         with self.lock(session_id):
             session = self.sessions.load(session_id)
             if session.pending_task_id:
                 raise TurnInProgress("Decide on the pending approval before sending a message.")
-            model = self.model_factory(api_key, model_name)
+            model = self.model(choice)
             workflow = self.workflow(session)
             task = Task.create(
                 workflow,
@@ -160,15 +190,14 @@ class AgentService:
                 {"role": "user", "content": text, "task_id": task.id, "at": now()}
             )
             self.sessions.save(session)
-            return self._run(session.id, workflow, task, self.engine(model))
+            return self._run(session.id, workflow, task, model)
 
     def decide(
         self,
         session_id: str,
         request_id: str,
         approved: bool,
-        api_key: str,
-        model_name: str,
+        choice: ModelChoice,
         comment: str = "",
     ) -> TurnResult:
         with self.lock(session_id):
@@ -176,13 +205,17 @@ class AgentService:
             if not session.pending_task_id:
                 raise NoPendingTurn("No turn is waiting for a decision.")
             task = self.sessions.load_task(session.id, session.pending_task_id)
+            model = self.model(choice)
             resolve_human_check(
                 task, request_id, approved, reviewer=f"session:{session.id}", comment=comment
             )
-            model = self.model_factory(api_key, model_name)
-            return self._run(session.id, self.workflow(session), task, self.engine(model))
+            return self._run(session.id, self.workflow(session), task, model)
 
-    def _run(self, session_id: str, workflow, task: Task, engine: WorkflowEngine) -> TurnResult:
+    def _run(self, session_id: str, workflow, task: Task, model: ChatModel) -> TurnResult:
+        engine = self.engine(model)
+        label = {"provider": model.provider, "model": model.model}
+        if label not in task.metadata.setdefault("models", []):
+            task.metadata["models"].append(label)
         engine.task_pool.add(task)
         while ready := engine.task_pool.ready():
             for ready_task, execution in ready:
@@ -199,6 +232,7 @@ class AgentService:
             tool_logs=journal.tool_logs(task),
             audit_entries=journal.audit_entries(task),
             pending_approvals=journal.pending_approvals(task),
+            stats=turn_stats(task),
         )
         if result.pending_approvals:
             result.status = "waiting"
@@ -213,7 +247,13 @@ class AgentService:
                 result.answer = REJECTED_NOTE if self._rejected(task) else None
             if result.answer:
                 session.messages.append(
-                    {"role": "assistant", "content": result.answer, "task_id": task.id, "at": now()}
+                    {
+                        "role": "assistant",
+                        "content": result.answer,
+                        "task_id": task.id,
+                        "at": now(),
+                        "model": f"{model.provider}/{model.model}",
+                    }
                 )
         self.sessions.save(session)
         return result
