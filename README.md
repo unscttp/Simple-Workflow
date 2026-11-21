@@ -265,6 +265,16 @@ one that worked:
    asks to save it with a usage scenario. You are asked only after the adapted
    graph ran successfully; declining keeps the turn's result.
 
+NLG also records, without the model, the environment and history of every
+saved graph in `graphs/<id>.meta.json`: the environment when it was saved and
+at its last successful run (node types, the tools and allowances its stages
+use, and the model, which this app declares as a host fact), run counts and
+the last run's outcome and error. When the skill is opened, each graph comes
+with a status (`same`, `changed`, `incompatible` or `unknown`), the concrete
+changes and a hint, for example that the graph last worked with another
+model. The skill tells the assistant to follow that hint: reuse graphs whose
+environment is the same, adapt incompatible ones, and judge changed ones.
+
 Saved graphs are written to `graphs/<id>.json` and `.md` in the installed skill
 under `SW_DATA_DIR/skills/survey-creator/`, so they survive upgrades and the
 Docker volume keeps them. At start-up the bundled skill files are copied over

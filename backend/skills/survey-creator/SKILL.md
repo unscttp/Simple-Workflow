@@ -77,6 +77,13 @@ whose usage scenario best fits the request and call
 `id` as `graph_id`. Ignore entries marked `invalid`. The user reviews the graph
 before it runs.
 
+Each entry also says how the graph did before and whether the setup it last
+worked in still holds: `history` (runs, last outcome), `environment.status`
+and a `hint`. Follow the hint. Prefer graphs whose status is `same`; never
+reuse an `incompatible` one as it is (adapt it instead); for `changed` (for
+example a different model or changed tools), reuse it only if the listed
+changes do not matter for this request.
+
 **Adapt it when the request needs something different** and `graph_create` is
 available, for example a stage
 that searches Chinese databases, a narrower collect stage, or a different

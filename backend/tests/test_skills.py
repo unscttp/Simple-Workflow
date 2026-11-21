@@ -379,6 +379,18 @@ class SurveyPipelineTests(ApiCase):
         self.assertEqual(graphs[0]["id"], saved.stem)
         self.assertEqual(graphs[0]["title"], "Bilingual survey")
         self.assertEqual(graphs[0]["nodes"][1]["name"], "Collect Chinese and English sources")
+        # Recorded by NLG without the model: environment and history of the saved graph.
+        meta = json.loads(saved.with_name(f"{saved.stem}.meta.json").read_text("utf-8"))
+        self.assertEqual(meta["saved"]["environment"]["host"], {"model": "scripted/scripted-model"})
+        self.assertEqual(meta["runs"]["completed"], 1)
+        self.assertEqual(graphs[0]["environment"]["status"], "same")
+        self.assertIn("safe to reuse", graphs[0]["hint"])
+        self.model.model = "another-model"  # the user switched models
+        self.send("再写一篇", call("skill_survey-creator_invoke"), answer("好"))
+        changed = json.loads(self.model.turns[-1].steps[0].output)["graphs"][0]
+        self.assertEqual(changed["environment"]["status"], "changed")
+        self.assertIn("scripted/scripted-model → scripted/another-model", changed["hint"])
+        self.model.model = "scripted-model"
         turn = self.send(
             "再写一篇",
             call("skill_survey-creator_invoke"),

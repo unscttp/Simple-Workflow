@@ -140,6 +140,9 @@ class AgentService:
         )
         engine.knowledge_trusted_actions |= TRUSTED_ACTIONS
         engine.add_run_observer(self.live.observe)
+        # Recorded with every run of a graph saved in a skill; when it differs later,
+        # the skill listing tells the model the graph last worked with another model.
+        engine.host_environment = {"model": f"{model.provider}/{model.model}"}
         # Each turn is a short task: active-memory notes would only add model calls.
         adapter = AgentAdapter(model, self.system_prompt, self.known_tools)
         engine.register_llm(NODE_TYPE, adapter, memory_writer=False)
