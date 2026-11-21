@@ -48,6 +48,8 @@ export type Approval = {
   skill?: string | null;
   graph?: { nodes: { id: string; name: string; allowance: string | null }[]; edges: GraphEdge[] } | null;
   path?: string | null;
+  skill_graph?: string | null; // a graph saved in the skill, run again
+  usage_scenario?: string | null; // when to use a graph that would be saved
 };
 
 export type NodeStatus = "pending" | "ready" | "running" | "waiting" | "completed" | "failed" | "skipped";
@@ -76,6 +78,8 @@ export type GraphView = {
   depth: number;
   explanation: string | null;
   skill: string | null;
+  skill_graph: string | null;
+  saved: "saved" | "declined" | null;
   status: string;
   start: string[];
   nodes: GraphNode[];

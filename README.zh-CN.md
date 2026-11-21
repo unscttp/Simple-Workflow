@@ -180,6 +180,7 @@ cd frontend && npm install && npm run dev
 | `knowledge.propose` | medium | 审核队列 | 提出知识变更（见下文） |
 | `skill.survey-creator.invoke` / `read` / `finish` | low | – | 打开综述技能、读取其中的文件、关闭技能 |
 | `skill.survey-creator.script` | high | 每次调用 | 运行技能中的 `scripts/check_survey.py` |
+| `skill.survey-creator.run_graph` | high | 每个图 | 把技能中保存的图作为子任务运行 |
 | `graph.create` | high | 每个图 | 把经审核的工作流图作为子任务运行 |
 
 工具运行前会按其 JSON schema 校验参数；错误会返回给模型，以便它修正调用。文件名只能是不含目录的普通名称。
@@ -198,19 +199,33 @@ cd frontend && npm install && npm run dev
 | `templates/outline.md` | 综述的章节规划 |
 | `references/structure.md` | 如何建立分类体系、对比表以及挑战与展望 |
 | `references/citations.md` | 数字引用格式、类 APA 与 GB/T 7714-2015 参考文献格式 |
-| `graphs/survey-pipeline.json` / `.md` | 流水线图及其使用场景，格式与 NLG 把图保存进技能时相同 |
+| `graphs/survey-pipeline.json` / `.md` | 标准流水线图及其使用场景，格式与 NLG 把图保存进技能时相同 |
 | `scripts/check_survey.py` | 检查已保存的综述：章节、引用编号、缺少链接的参考文献、文献新近程度 |
 
 在对话中提出要求即可，例如“写一篇关于检索增强生成的综述”。具体过程取决于风险级别：
 
 - **low / medium**：助手打开技能，读取需要的文件，自己完成各个步骤。保存报告需要 medium。
-- **high**：额外提供两个工具。`graph_create` 把技能中的四阶段流水线（确定范围 → 收集文献 → 组织结构 → 撰写）
-  作为生成图运行：运行前你会在审批卡片中看到各阶段及其权限，运行时工作流图视图会跟踪子任务。
-  研究阶段使用 `survey-research` allowance（只能搜索和读取技能），撰写阶段使用 `survey-writer`（另可保存和编辑报告）。
-  之后 `skill_survey-creator_script` 会对保存的文件运行检查脚本，同样需要你批准。
+- **high**：额外提供三个工具。`skill_survey-creator_run_graph` 运行技能中保存的图，`graph_create` 运行修改后的图，两者都作为生成图运行：运行前你会在审批卡片中看到各阶段及其权限，
+  运行时工作流图视图会跟踪子任务。研究阶段使用 `survey-research` allowance（只能搜索和读取技能），
+  撰写阶段使用 `survey-writer`（另可保存和编辑报告）。之后 `skill_survey-creator_script` 会对保存的文件运行检查脚本，
+  同样需要你批准。
+
+### 技能记住的图
+
+技能会保留运行时用过的图，下次写综述时可以从一个已经成功过的图开始：
+
+1. 打开技能时会列出其中保存的图，按时间从新到旧，附带标题、适用场景和各个阶段。`survey-pipeline` 随技能提供。
+2. 助手用 `skill_survey-creator_run_graph` 按 id 重新运行最合适的图，不需要复制整个图。NLG 通过技能的 `SkillGraphInterface`
+   钩子运行它，审核和权限检查与其他生成图相同。审批卡片会注明复用的是哪个保存的图。
+3. 当请求需要不同的流程时（例如增加文献来源，或增加针对中文文献的阶段），助手会修改最接近的图，并请求连同使用场景一起保存。
+   只有修改后的图成功运行之后才会询问你；拒绝保存不会影响本轮结果。
+
+保存的图写入已安装技能的 `graphs/<id>.json` 和 `.md`，位于 `SW_DATA_DIR/skills/survey-creator/` 下，
+因此升级后仍然保留，Docker 数据卷也会保存它们。启动时会用随应用提供的技能文件覆盖该目录，但不会动保存的图。
+删除其中的文件即可让技能忘记某个图。
 
 这里用到的 NLG 功能：技能调用、限定在技能包内的文件读取与路径检查、子任务中的技能调用、按哈希固定并需人工批准的脚本、
-带 allowance 子集检查和审核的生成图、子任务审批转交给父任务，以及日志和审计记录中的技能活动。
+带 allowance 子集检查和审核的生成图、子任务审批转交给父任务、把图保存到技能并通过 `SkillGraphInterface` 钩子再次运行，以及日志和审计记录中的技能活动。
 
 要添加其他技能，把技能包放到 `backend/skills/<名称>/`，在 `backend/app/tools/__init__.py` 的 `SKILLS` 中登记它及可运行的脚本，
 并把对应的 `tool:skill.<名称>.*` 动作加入三个风险 allowance。
@@ -316,7 +331,10 @@ git -C third_party/nlg fetch origin && git -C third_party/nlg checkout <commit>
 - ReAct 动作无法把服务商状态（Gemini 的 thought signature、Claude 的 thinking 块、GPT 的推理条目）带到下一次决策，
   导致 Gemini 在第二次工具调用时失败，其他模型在工具调用之间丢失推理过程。现在动作带有不透明的 `model_state`；
 - 在 `graph.create` 调用返回之前，宿主看不到生成图的子任务，因此既无法显示其进度，也无法判断子任务属于哪个会话。
-  现在 `engine.add_run_observer` 会报告每个节点 execution，包括子任务中的。
+  现在 `engine.add_run_observer` 会报告每个节点 execution，包括子任务中的；
+- 保存到技能中的图之后无法被找到或再次运行：打开技能时不会提到它，也没有按 id 运行的方式。而且保存审核发生在图运行之前，
+  拒绝保存会让节点失败。现在 `skill.<名称>.invoke` 会列出保存的图，`skill.<名称>.run_graph` 通过已实现的 `SkillGraphInterface` 运行它们，
+  只有成功运行后才会提议保存，拒绝保存也不会丢弃结果。
 
 在本应用中发现并处理、未改动框架的问题：
 

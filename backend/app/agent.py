@@ -104,6 +104,7 @@ class AgentService:
             reports_root=settings.reports_root,
             search=search,
             session_of=self.live.session_of,
+            skills_dir=Path(settings.data_dir) / "skills",
         )
         self.allowances = AllowanceRegistry()
         for path in sorted((CONFIG_DIR / "allowances").glob("*.json")):
