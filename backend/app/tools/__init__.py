@@ -8,6 +8,7 @@ from pathlib import Path
 from workflow_core import LocalToolModule, Task, register_skill
 
 from ..sessions import SessionStore
+from ..skills import install_skill
 from .analysis import TOOLS as ANALYSIS_TOOLS
 from .reports import ReportTools
 from .research import WEB_SEARCH, SearchFunction, duckduckgo_search, web_search_handler
@@ -18,6 +19,7 @@ from .research import WEB_SEARCH, SearchFunction, duckduckgo_search, web_search_
 TRUSTED_ACTIONS = {"tool:data.analyze_trend"}
 
 # Agent Skills the assistant can open, with the scripts each may run (after approval).
+# They are installed into the data folder (see app.skills) and registered from there.
 SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 SKILLS = {"survey-creator": ["scripts/check_survey.py"]}
 
@@ -28,6 +30,7 @@ def build_tools(
     reports_root: Path | None = None,
     search: SearchFunction = duckduckgo_search,
     session_of: Callable[[Task], str] | None = None,
+    skills_dir: Path | None = None,
 ) -> LocalToolModule:
     module = LocalToolModule()
     module.register(WEB_SEARCH, web_search_handler(search))
@@ -36,5 +39,8 @@ def build_tools(
     for definition, handler in ReportTools(sessions, reports_root, session_of).tools():
         module.register(definition, handler)
     for name, scripts in SKILLS.items():
-        register_skill(module, SKILLS_DIR / name, scripts=scripts)
+        package = SKILLS_DIR / name
+        if skills_dir is not None:
+            package = install_skill(package, Path(skills_dir) / name)
+        register_skill(module, package, scripts=scripts)
     return module

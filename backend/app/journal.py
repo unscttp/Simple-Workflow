@@ -26,6 +26,7 @@ AUDIT_EVENT_TYPES = {
     "graph.completed": "Generated graph finished",
     "graph.failed": "Generated graph failed",
     "skill.graph.saved": "Graph saved to skill",
+    "skill.graph.save_declined": "Saving the graph declined",
 }
 
 
@@ -148,6 +149,8 @@ def pending_approvals(task: Task) -> list[dict]:
                     "edges": [{"from": e["from"], "to": e["to"]} for e in graph["edges"]],
                 },
                 "path": details.get("path"),
+                "skill_graph": details.get("skill_graph"),
+                "usage_scenario": details.get("usage_scenario"),
             }
         )
     return approvals

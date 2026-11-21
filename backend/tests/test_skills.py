@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import unittest
+from pathlib import Path
 
 from app.model import STAGE_NOTE
 from app.tools import SKILLS_DIR
@@ -184,15 +185,49 @@ SURVEY_REPORT = GOOD_SURVEY
 class SurveyPipelineTests(ApiCase):
     """The skill's graph runs as a reviewed child task; the graph view follows it."""
 
-    def pipeline_call(self, turn):
+    def adapted_call(self, turn):
+        """The bundled pipeline with a changed collect stage, to be saved in the skill."""
         document = json.loads(last_result(turn)["content"])
+        nodes = document["graph"]["nodes"]
+        nodes[1]["name"] = "Collect Chinese and English sources"
+        nodes[1]["config"]["instruction"] += " Also search CNKI-indexed Chinese literature."
         return call(
             "graph_create",
-            nodes=document["graph"]["nodes"],
+            nodes=nodes,
             edges=document["graph"]["edges"],
             start=document["start"],
             explanation=document["explanation"],
+            save_to_skill=True,
+            usage_scenario="# Bilingual survey\nFor surveys that cover Chinese literature too.",
         )
+
+    @staticmethod
+    def stage_replies():
+        return [
+            answer("RQ1"),
+            answer("[1] Agent trends. https://example.com"),
+            answer("分类"),
+            call("reports_save", title="综述", content=GOOD_SURVEY, format="md", filename="survey"),
+            answer("survey.md"),
+        ]
+
+    def run_adapted_graph(self):
+        """Run the adapted graph; return the turn waiting for the save decision."""
+        self.set_risk("high")
+        self.grant_workspace()
+        turn = self.send(
+            "写一篇覆盖中英文文献的综述",
+            call("skill_survey-creator_invoke"),
+            lambda t: call(
+                "skill_survey-creator_read",
+                invoke_id=invoke_id(t),
+                path="graphs/survey-pipeline.json",
+            ),
+            self.adapted_call,
+        )
+        turn = self.decide(turn["pending_approvals"][0]["id"], True, *self.stage_replies())
+        self.assertEqual(turn["status"], "waiting")
+        return turn
 
     def test_pipeline_runs_after_review_and_the_view_follows_it(self):
         self.set_risk("high")
@@ -200,16 +235,12 @@ class SurveyPipelineTests(ApiCase):
         turn = self.send(
             "写一篇关于检索增强生成的综述",
             call("skill_survey-creator_invoke"),
-            lambda t: call(
-                "skill_survey-creator_read",
-                invoke_id=invoke_id(t),
-                path="graphs/survey-pipeline.json",
-            ),
-            self.pipeline_call,
+            call("graph_create", skill_graph="survey-pipeline"),
         )
         (approval,) = turn["pending_approvals"]
         self.assertEqual(approval["kind"], "graph_creation")
         self.assertEqual(approval["skill"], "survey-creator")
+        self.assertEqual(approval["skill_graph"], "survey-pipeline")
         self.assertEqual(
             [node["id"] for node in approval["graph"]["nodes"]],
             ["scope", "collect", "organise", "write"],
@@ -300,21 +331,100 @@ class SurveyPipelineTests(ApiCase):
         turn = self.send(
             "综述",
             call("skill_survey-creator_invoke"),
-            lambda t: call(
-                "skill_survey-creator_read",
-                invoke_id=invoke_id(t),
-                path="graphs/survey-pipeline.json",
-            ),
-            self.pipeline_call,
+            call("graph_create", skill_graph="survey-pipeline"),
         )
         turn = self.decide(turn["pending_approvals"][0]["id"], False)
         self.assertEqual(turn["status"], "failed")
         self.assertEqual(self.graph()["graphs"][1]["status"], "awaiting_review")
 
+    def test_opening_the_skill_lists_its_graphs(self):
+        self.send("综述", call("skill_survey-creator_invoke"), answer("好"))
+        opened = json.loads(self.model.turns[-1].steps[0].output)
+        (graph,) = opened["graphs"]
+        self.assertEqual((graph["id"], graph["title"]), ("survey-pipeline", "Survey pipeline"))
+        self.assertEqual(
+            [n["id"] for n in graph["nodes"]], ["scope", "collect", "organise", "write"]
+        )
+
+    def test_a_successful_graph_can_be_saved_found_and_rerun(self):
+        turn = self.run_adapted_graph()
+        (approval,) = turn["pending_approvals"]
+        self.assertEqual(approval["kind"], "skill_graph_save")
+        self.assertTrue(approval["usage_scenario"].startswith("# Bilingual survey"))
+        installed = self.root / "data" / "skills" / "survey-creator"
+        self.assertTrue(approval["path"].startswith(str(installed)))
+        self.assertTrue((self.reports / "survey.md").exists())  # the graph already ran
+        self.assertEqual(self.graph()["graphs"][1]["status"], "completed")
+
+        turn = self.decide(
+            approval["id"], True, lambda t: answer(str(last_result(t)["saved_path"]))
+        )
+        self.assertEqual(turn["status"], "completed")
+        saved = Path(turn["answer"])
+        self.assertEqual(saved.parent, installed / "graphs")
+        self.assertTrue(saved.with_suffix(".md").exists())
+        self.assertFalse((SKILL / "graphs" / saved.name).exists())  # not in the app folder
+        self.assertEqual(self.graph()["graphs"][1]["saved"], "saved")
+        self.assertIn("Graph saved to skill", " ".join(e["summary"] for e in turn["audit_entries"]))
+
+        # A later turn: the saved graph is offered first and reruns by its id.
+        self.send("再写一篇", call("skill_survey-creator_invoke"), answer("好"))
+        graphs = json.loads(self.model.turns[-1].steps[0].output)["graphs"]
+        self.assertEqual(graphs[0]["id"], saved.stem)
+        self.assertEqual(graphs[0]["title"], "Bilingual survey")
+        self.assertEqual(graphs[0]["nodes"][1]["name"], "Collect Chinese and English sources")
+        turn = self.send(
+            "再写一篇",
+            call("skill_survey-creator_invoke"),
+            call("graph_create", skill_graph=saved.stem),
+        )
+        (approval,) = turn["pending_approvals"]
+        self.assertEqual(
+            (approval["kind"], approval["skill_graph"]), ("graph_creation", saved.stem)
+        )
+        self.assertEqual(self.graph()["graphs"][1]["skill_graph"], saved.stem)
+
+    def test_declining_the_save_keeps_the_turn(self):
+        turn = self.run_adapted_graph()
+        turn = self.decide(
+            turn["pending_approvals"][0]["id"],
+            False,
+            lambda t: answer(f"未保存：{last_result(t)['saved_path']}"),
+        )
+        self.assertEqual((turn["status"], turn["answer"]), ("completed", "未保存：None"))
+        installed = self.root / "data" / "skills" / "survey-creator" / "graphs"
+        self.assertEqual(
+            sorted(p.name for p in installed.iterdir()),
+            ["survey-pipeline.json", "survey-pipeline.md"],
+        )
+        self.assertEqual(self.graph()["graphs"][1]["saved"], "declined")
+
     def graph(self) -> dict:
         response = self.client.get(f"/api/sessions/{self.session['id']}/graph")
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
+
+
+class SkillInstallTests(unittest.TestCase):
+    def test_install_updates_shipped_files_and_keeps_saved_graphs(self):
+        import tempfile
+
+        from app.skills import install_skill
+
+        with tempfile.TemporaryDirectory() as folder:
+            source, target = Path(folder) / "source", Path(folder) / "target"
+            (source / "graphs").mkdir(parents=True)
+            (source / "SKILL.md").write_text("v1")
+            (source / "old.md").write_text("old")
+            (source / "graphs" / "pipeline.json").write_text("{}")
+            install_skill(source, target)
+            (target / "graphs" / "graph_1.json").write_text("{}")  # saved by a user
+            (source / "SKILL.md").write_text("v2")
+            (source / "old.md").unlink()
+            install_skill(source, target)
+            self.assertEqual((target / "SKILL.md").read_text(), "v2")
+            self.assertFalse((target / "old.md").exists())
+            self.assertTrue((target / "graphs" / "graph_1.json").exists())
 
 
 class GraphViewTests(ApiCase):

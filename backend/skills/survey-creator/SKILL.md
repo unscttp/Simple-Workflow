@@ -64,21 +64,31 @@ citation, not on length.
 ## Running the steps as a workflow graph
 
 If the tool `graph_create` is available (the session's risk level is high), you
-can run steps 3-6 as a reviewed workflow graph instead of doing them yourself:
+can run steps 3-6 as a reviewed workflow graph instead of doing them yourself.
+Finish steps 1-2 first: the graph's nodes read the scope from the conversation
+and save into the approved folder.
 
-1. Finish steps 1-2 first: the graph's nodes read the scope from your request
-   and save into the approved folder.
-2. Read `graphs/survey-pipeline.json` with `skill_survey-creator_read`. It
-   holds `graph` (with `nodes` and `edges`), `start` and `explanation`.
-3. Call `graph_create` with exactly those `nodes`, `edges`, `start` and
-   `explanation`, plus `skill_invoke_id` set to this skill's invocation id.
-   Replace nothing in the nodes; the scope reaches them through the
-   conversation. The user reviews the graph before it runs.
-4. The call returns the child task's data. `survey.report` names the saved
-   file. Then continue with steps 7-8.
+**Reuse a graph that worked before.** Opening this skill returned `graphs`: the
+graphs saved in it, newest first, each with an `id`, a `title`, its
+`usage_scenario` (when to use it) and its stages. `survey-pipeline` is the
+standard four-stage pipeline (scope, collect, organise, write). Pick the graph
+whose usage scenario best fits the request and call `graph_create` with only
+`skill_graph` set to its `id` (and `skill_invoke_id`). Ignore entries marked
+`invalid`. The user reviews the graph before it runs.
 
-If the graph is rejected or fails, explain why and carry on with steps 3-6
-yourself.
+**Adapt it when the request needs something different**, for example a stage
+that searches Chinese databases, a narrower collect stage, or a different
+writing format. Read the closest graph with `skill_survey-creator_read`
+(`graphs/<id>.json`), change what the request needs, and call `graph_create`
+with the full `nodes`, `edges`, `start` and `explanation`. Also set
+`save_to_skill: true` and a Markdown `usage_scenario` that starts with a short
+title line and says when the graph should be used, so a similar survey can
+reuse it. The user is asked whether to save it only after it ran successfully.
+
+The call returns the child task's data: `result.survey.report` names the saved
+file, and `saved_path` says where the graph was saved (or `null`). Then continue
+with steps 7-8. If the graph is rejected or fails, explain why and carry on
+with steps 3-6 yourself.
 
 ## Files in this skill
 
@@ -87,5 +97,5 @@ yourself.
 | `templates/outline.md` | Planning the sections (step 1) |
 | `references/structure.md` | Building the taxonomy and comparison (step 5) |
 | `references/citations.md` | Writing citations and references (step 6) |
-| `graphs/survey-pipeline.json` | Running steps 3-6 as a workflow graph |
+| `graphs/<id>.json` | Graphs for steps 3-6; listed when the skill opens. `survey-pipeline` ships with the skill, others were saved from earlier runs |
 | `scripts/check_survey.py` | Run it in step 7; no need to read it |

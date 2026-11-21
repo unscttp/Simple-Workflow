@@ -132,7 +132,23 @@ export function ApprovalCard({
       {approval.skill && (
         <p className="mt-1 text-xs text-amber-800">
           技能：<span className="font-mono">{approval.skill}</span>
+          {approval.skill_graph && (
+            <>
+              {" "}
+              · 复用技能中保存的图 <span className="font-mono">{approval.skill_graph}</span>
+            </>
+          )}
         </p>
+      )}
+      {approval.kind === "skill_graph_save" && (
+        <p className="mt-1 text-xs text-amber-800">
+          这个图已经成功运行。保存后，下次使用该技能时可以直接复用它；拒绝保存不会影响本轮结果。
+        </p>
+      )}
+      {approval.usage_scenario && (
+        <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-white/70 p-2 font-sans text-xs text-slate-700">
+          {approval.usage_scenario}
+        </pre>
       )}
       {approval.graph && (
         <ol className="mt-2 space-y-1 text-xs">

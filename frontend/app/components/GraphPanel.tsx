@@ -219,6 +219,13 @@ export function GraphPanel({ graph }: { graph: TaskGraph | null }) {
                     </>
                   )}{" "}
                   · {GRAPH_STATUS[g.status] ?? g.status}
+                  {g.skill_graph && (
+                    <>
+                      {" "}
+                      · 复用保存的图 <span className="font-mono">{g.skill_graph}</span>
+                    </>
+                  )}
+                  {g.saved && <> · {g.saved === "saved" ? "已保存到技能" : "未保存"}</>}
                 </p>
                 {g.explanation && <p className="mt-1 text-slate-500">{g.explanation}</p>}
               </div>

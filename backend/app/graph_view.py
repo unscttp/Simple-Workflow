@@ -125,6 +125,9 @@ def _children(task: Task, graph_id: str, live: LiveTasks, depth: int) -> list[di
                     "depth": depth,
                     "explanation": record.get("explanation"),
                     "skill": (record.get("skill") or {}).get("name"),
+                    # The saved graph this run reused, and whether this run was saved.
+                    "skill_graph": record.get("skill_graph"),
+                    "saved": record.get("save_outcome"),
                     "status": _graph_status(record, child),
                     "start": record.get("start", []),
                     "nodes": _nodes(graph["nodes"], child),
@@ -145,6 +148,8 @@ def _build(workflow: WorkflowDefinition, task: Task | None, live: LiveTasks, run
         "depth": 0,
         "explanation": definition.get("description") or None,
         "skill": None,
+        "skill_graph": None,
+        "saved": None,
         "status": "idle" if task is None else task.status,
         "start": list(workflow.start),
         "nodes": _nodes(definition["nodes"], task),

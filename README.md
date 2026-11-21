@@ -230,7 +230,7 @@ tools that go through the session's risk level like any other.
 | `templates/outline.md` | Section plan of a survey |
 | `references/structure.md` | Building the taxonomy, the comparison table and the challenges |
 | `references/citations.md` | Numeric citations, APA-like and GB/T 7714-2015 references |
-| `graphs/survey-pipeline.json` / `.md` | The pipeline graph and its usage scenario, in the format NLG uses for graphs saved into a skill |
+| `graphs/survey-pipeline.json` / `.md` | The standard pipeline graph and its usage scenario, in the format NLG uses for graphs saved into a skill |
 | `scripts/check_survey.py` | Checks a saved survey: sections, citation numbering, references without URLs, recency |
 
 Ask for it in the chat, for example "写一篇关于检索增强生成的综述". What happens
@@ -238,20 +238,40 @@ depends on the risk level:
 
 - **low / medium**: the assistant opens the skill, reads the files it needs
   and does the steps itself. Saving needs medium.
-- **high**: two more tools are offered. `graph_create` runs the skill's
-  four-stage pipeline (scope → collect → organise → write) as a generated
-  graph: you see the stages and their permissions in an approval card first,
-  and the graph view follows the child task while it runs. The research stages
-  use the `survey-research` allowance (search and skill reading only), the
-  writing stage `survey-writer` (adds saving and editing reports). Then
-  `skill_survey-creator_script` runs the check script on the saved file, again
-  after your approval.
+- **high**: two more tools are offered. `graph_create` runs a graph from the
+  skill as a generated graph: you see the stages and their permissions in an
+  approval card first, and the graph view follows the child task while it
+  runs. The research stages use the `survey-research` allowance (search and
+  skill reading only), the writing stage `survey-writer` (adds saving and
+  editing reports). Then `skill_survey-creator_script` runs the check script
+  on the saved file, again after your approval.
+
+### Graphs remembered by the skill
+
+The skill keeps the graphs it was run with, so the next survey can start from
+one that worked:
+
+1. Opening the skill lists the graphs saved in it, newest first, with a title,
+   when to use each one and its stages. `survey-pipeline` ships with the skill.
+2. The assistant reruns the best fit by its id (`graph_create` with
+   `skill_graph`), without copying the graph. The approval card says which
+   saved graph is being reused.
+3. When a request needs a different process (for example an extra source, or
+   a stage for Chinese literature), the assistant adapts the closest graph and
+   asks to save it with a usage scenario. You are asked only after the adapted
+   graph ran successfully; declining keeps the turn's result.
+
+Saved graphs are written to `graphs/<id>.json` and `.md` in the installed skill
+under `SW_DATA_DIR/skills/survey-creator/`, so they survive upgrades and the
+Docker volume keeps them. At start-up the bundled skill files are copied over
+that folder; saved graphs are left alone. Delete a file there to forget a
+graph.
 
 NLG features this exercises: skill invocation, package-relative reads and
-path checks, nested invocations in child tasks, hash-pinned scripts with
-human approval, generated graphs with allowance subsets and review, child
-approvals bridged to the parent, and the skill activity in the journal and
-audit trail.
+path checks, skill invocations in child tasks, hash-pinned scripts with human
+approval, generated graphs with allowance subsets and review, child approvals
+bridged to the parent, saving graphs into a skill and rerunning them by id,
+and the skill activity in the journal and audit trail.
 
 To add another skill, put a package under `backend/skills/<name>/`, add it to
 `SKILLS` in `backend/app/tools/__init__.py` with the scripts it may run, and
@@ -384,7 +404,13 @@ Gaps found while porting and fixed in the framework:
 - the host could not see the child task of a generated graph until the
   `graph.create` call returned, so it could neither show its progress nor
   tell which session a child task belonged to. `engine.add_run_observer` now
-  reports every node execution, including child ones.
+  reports every node execution, including child ones;
+- a graph saved into a skill could not be found or rerun later: opening the
+  skill did not mention it and there was no way to run it by id. Saving was
+  also reviewed before the graph ran, and declining it failed the node. Now
+  `skill.<name>.invoke` lists saved graphs, `graph.create` takes
+  `skill_graph`, saving is offered only after a successful run, and declining
+  keeps the result.
 
 Found and handled in this app, not in the framework:
 
