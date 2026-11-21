@@ -28,6 +28,8 @@ from workflow_core import (
 )
 
 from . import journal
+from .graph_view import task_graph
+from .live import LiveTasks
 from .model import AgentAdapter, KnowledgeWriterAdapter
 from .providers import ChatModel, Provider, create_model
 from .sessions import RISK_LEVELS, Session, SessionStore, now
@@ -94,7 +96,15 @@ class AgentService:
         self.model_factory = model_factory
         self.sessions = SessionStore(settings.data_dir)
         self.knowledge = KnowledgeStore(Path(settings.data_dir) / "knowledge")
-        self.tools = build_tools(self.sessions, reports_root=settings.reports_root, search=search)
+        # Running turns and their generated-graph child tasks, for tools and the graph view.
+        self.live = LiveTasks()
+        self._running: dict[str, str] = {}  # session id -> id of the task running now
+        self.tools = build_tools(
+            self.sessions,
+            reports_root=settings.reports_root,
+            search=search,
+            session_of=self.live.session_of,
+        )
         self.allowances = AllowanceRegistry()
         for path in sorted((CONFIG_DIR / "allowances").glob("*.json")):
             self.allowances.load(path)
@@ -103,6 +113,7 @@ class AgentService:
         self.known_tools = [tool.name for tool in self.tools.list_tools()] + [
             f"knowledge.{op}" for op in ("list", "read", "search", "propose")
         ]
+        self.known_tools.append("graph.create")
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
 
@@ -127,6 +138,7 @@ class AgentService:
             memory_settings_path=CONFIG_DIR / "memory_settings.json",
         )
         engine.knowledge_trusted_actions |= TRUSTED_ACTIONS
+        engine.add_run_observer(self.live.observe)
         # Each turn is a short task: active-memory notes would only add model calls.
         adapter = AgentAdapter(model, self.system_prompt, self.known_tools)
         engine.register_llm(NODE_TYPE, adapter, memory_writer=False)
@@ -217,11 +229,16 @@ class AgentService:
         if label not in task.metadata.setdefault("models", []):
             task.metadata["models"].append(label)
         engine.task_pool.add(task)
-        while ready := engine.task_pool.ready():
-            for ready_task, execution in ready:
-                engine.run_execution(workflow, ready_task, execution)
-        if task.status == "failed" and not task.metadata.get("knowledge_consolidated"):
-            engine.consolidate_knowledge(workflow, task)
+        self._running[session_id] = task.id
+        try:
+            while ready := engine.task_pool.ready():
+                for ready_task, execution in ready:
+                    engine.run_execution(workflow, ready_task, execution)
+            if task.status == "failed" and not task.metadata.get("knowledge_consolidated"):
+                engine.consolidate_knowledge(workflow, task)
+        finally:
+            self._running.pop(session_id, None)
+            self.live.release(task.id)
 
         # Tools may have changed the session (an approved folder), so reload it.
         session = self.sessions.load(session_id)
@@ -257,6 +274,32 @@ class AgentService:
                 )
         self.sessions.save(session)
         return result
+
+    # -- graph view ------------------------------------------------------------
+
+    def graph(self, session_id: str, task_id: str | None = None) -> dict:
+        """The workflow graph of a turn and where it is: the running turn, the
+        turn waiting for approval, or the latest finished turn."""
+        session = self.sessions.load(session_id)
+        task_id = task_id or self._running.get(session_id) or session.pending_task_id
+        if task_id is None:
+            task_id = next(
+                (m["task_id"] for m in reversed(session.messages) if m.get("task_id")), None
+            )
+        task = self.live.get(task_id) if task_id else None
+        if task is not None and task.metadata.get("session_id") != session.id:
+            task = None  # only root turns of this session, never another session's task
+        if task is None and task_id:
+            try:
+                task = self.sessions.load_task(session.id, task_id)
+            except (FileNotFoundError, KeyError, ValueError):
+                task = None
+        return task_graph(
+            self.workflow(session),
+            task,
+            self.live,
+            running=task is not None and self._running.get(session_id) == task.id,
+        )
 
     @staticmethod
     def _rejected(task: Task) -> bool:

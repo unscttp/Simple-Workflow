@@ -137,6 +137,14 @@ def create_app(
             raise HTTPException(404, "Session not found.")
         return session_view(session_id)
 
+    @app.get("/api/sessions/{session_id}/graph")
+    def graph(session_id: str, task_id: str | None = None) -> dict:
+        """The turn's workflow graph and where it is; poll it while a turn runs."""
+        try:
+            return agent.graph(session_id, task_id)
+        except SessionNotFound:
+            raise HTTPException(404, "Session not found.")
+
     @app.post("/api/sessions/{session_id}/messages", response_model=TurnResponse)
     def send_message(session_id: str, body: MessageRequest) -> TurnResponse:
         return turn(

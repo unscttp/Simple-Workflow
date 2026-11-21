@@ -12,10 +12,12 @@ import {
   type Providers,
   type RiskLevel,
   type Session,
+  type TaskGraph,
   type ToolLog,
   type Turn,
   type TurnStats,
 } from "../lib/api";
+import { GraphPanel } from "./components/GraphPanel";
 import { ModelSettings, TurnStatsLine, useModelChoice } from "./components/ModelSettings";
 import {
   ApprovalCard,
@@ -40,6 +42,7 @@ export default function HomePage() {
   const [providers, setProviders] = useState<Providers | null>(null);
   const modelChoice = useModelChoice(providers?.providers ?? [], providers?.default ?? null);
   const [stats, setStats] = useState<TurnStats | null>(null);
+  const [graph, setGraph] = useState<TaskGraph | null>(null);
   const [input, setInput] = useState("");
   const [toolLogs, setToolLogs] = useState<ToolLog[]>([]);
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
@@ -47,6 +50,28 @@ export default function HomePage() {
   const [openPage, setOpenPage] = useState<{ page: string; content: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const refreshGraph = useCallback(async (sessionId: string) => {
+    try {
+      setGraph(await api.graph(sessionId));
+    } catch {
+      // The graph is a view of the turn; chat keeps working without it.
+    }
+  }, []);
+
+  const sessionId = session?.id;
+  useEffect(() => {
+    if (!sessionId) {
+      return;
+    }
+    void refreshGraph(sessionId);
+    if (!busy) {
+      return;
+    }
+    // While a turn runs, follow it: the backend reports the node and step it is on.
+    const timer = window.setInterval(() => void refreshGraph(sessionId), 1000);
+    return () => window.clearInterval(timer);
+  }, [sessionId, busy, refreshGraph]);
 
   const refreshKnowledge = useCallback(async () => {
     try {
@@ -253,6 +278,7 @@ export default function HomePage() {
               </div>
             )}
 
+            <GraphPanel graph={graph} />
             <ToolLogs logs={toolLogs} />
             <AuditTrail entries={auditEntries} />
             <KnowledgePanel

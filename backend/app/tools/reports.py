@@ -11,10 +11,11 @@ from __future__ import annotations
 import hashlib
 import re
 import shutil
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from workflow_core import ToolDefinition, ToolSafetyPolicy
+from workflow_core import Task, ToolDefinition, ToolSafetyPolicy
 
 from ..sessions import SessionStore
 from .documents import EDIT_MODES, READABLE_FORMATS, WRITERS, edit_docx, edit_markdown, read_text
@@ -120,17 +121,27 @@ def _stem(title: str) -> str:
 
 
 class ReportTools:
-    """Handlers bound to the session store; the session comes from task metadata."""
+    """Handlers bound to the session store.
 
-    def __init__(self, sessions: SessionStore, reports_root: Path | None = None) -> None:
+    ``session_of(task)`` names the session a task belongs to. Turns carry it in
+    their metadata; tasks of generated graphs are resolved through their parent.
+    """
+
+    def __init__(
+        self,
+        sessions: SessionStore,
+        reports_root: Path | None = None,
+        session_of: Callable[[Task], str] | None = None,
+    ) -> None:
         self.sessions = sessions
         self.reports_root = reports_root.resolve() if reports_root else None
         self.safety = ToolSafetyPolicy()
+        self.session_of = session_of or (lambda task: task.metadata["session_id"])
 
     # -- helpers -------------------------------------------------------------
 
     def _session(self, context):
-        return self.sessions.load(context.task.metadata["session_id"])
+        return self.sessions.load(self.session_of(context.task))
 
     def _workspace(self, context) -> Path:
         folder = self._session(context).workspace

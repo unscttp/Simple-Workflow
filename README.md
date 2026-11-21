@@ -16,6 +16,8 @@ real application and is where framework gaps are found.
 - [Model providers](#model-providers)
 - [Permissions and approvals](#permissions-and-approvals)
 - [Tools](#tools)
+- [Skills: survey creator](#skills-survey-creator)
+- [Workflow graph view](#workflow-graph-view)
 - [Long-term knowledge](#long-term-knowledge)
 - [HTTP API](#http-api)
 - [Data and privacy](#data-and-privacy)
@@ -32,8 +34,11 @@ frontend (Next.js) ──HTTP──> backend (FastAPI)
                                    ├─ one NLG task per chat message ("chat-turn" workflow)
                                    ├─ model adapter ── DeepSeek / Claude / GPT / Gemini
                                    ├─ tools: web, data, text, reports
+                                   ├─ skills: survey-creator (Agent Skills package)
+                                   ├─ generated graphs: reviewed child workflows (graph.create)
                                    ├─ allowances: risk-low / risk-medium / risk-high
-                                   └─ knowledge store (reviewed, shared across chats)
+                                   ├─ knowledge store (reviewed, shared across chats)
+                                   └─ live task registry ── workflow graph view
 ```
 
 - Every message you send starts one task of the `chat-turn` workflow
@@ -202,10 +207,71 @@ revoke the folder at any time; report tools stop working immediately.
 | `reports.delete` | high | every call | Delete one report |
 | `knowledge.list` / `read` / `search` | low | – | Read reviewed knowledge |
 | `knowledge.propose` | medium | review queue | Propose a knowledge change (see below) |
+| `skill.survey-creator.invoke` / `read` / `finish` | low | – | Open the survey skill, read its files, close it |
+| `skill.survey-creator.script` | high | every call | Run the skill's `scripts/check_survey.py` |
+| `graph.create` | high | every graph | Run a reviewed workflow graph as a child task |
 
 Arguments are checked against each tool's JSON schema before it runs; errors
 are returned to the model so it can correct the call. File names must be plain
 names without folders. To add a tool, follow `skills/adding-tools/SKILL.md`.
+
+## Skills: survey creator
+
+`backend/skills/survey-creator/` is an [Agent Skills](https://agentskills.io/specification)
+package that writes an academic survey (a literature review paper): it scopes
+the review, collects and screens sources with web search, builds a taxonomy
+and a comparison table, and saves a cited Markdown survey into the approved
+folder. NLG registers it with `register_skill`, which turns it into ordinary
+tools that go through the session's risk level like any other.
+
+| File | Contents |
+| --- | --- |
+| `SKILL.md` | Instructions returned by `invoke`: ground rules (never invent sources), eight steps, the graph option |
+| `templates/outline.md` | Section plan of a survey |
+| `references/structure.md` | Building the taxonomy, the comparison table and the challenges |
+| `references/citations.md` | Numeric citations, APA-like and GB/T 7714-2015 references |
+| `graphs/survey-pipeline.json` / `.md` | The pipeline graph and its usage scenario, in the format NLG uses for graphs saved into a skill |
+| `scripts/check_survey.py` | Checks a saved survey: sections, citation numbering, references without URLs, recency |
+
+Ask for it in the chat, for example "写一篇关于检索增强生成的综述". What happens
+depends on the risk level:
+
+- **low / medium**: the assistant opens the skill, reads the files it needs
+  and does the steps itself. Saving needs medium.
+- **high**: two more tools are offered. `graph_create` runs the skill's
+  four-stage pipeline (scope → collect → organise → write) as a generated
+  graph: you see the stages and their permissions in an approval card first,
+  and the graph view follows the child task while it runs. The research stages
+  use the `survey-research` allowance (search and skill reading only), the
+  writing stage `survey-writer` (adds saving and editing reports). Then
+  `skill_survey-creator_script` runs the check script on the saved file, again
+  after your approval.
+
+NLG features this exercises: skill invocation, package-relative reads and
+path checks, nested invocations in child tasks, hash-pinned scripts with
+human approval, generated graphs with allowance subsets and review, child
+approvals bridged to the parent, and the skill activity in the journal and
+audit trail.
+
+To add another skill, put a package under `backend/skills/<name>/`, add it to
+`SKILLS` in `backend/app/tools/__init__.py` with the scripts it may run, and
+add its `tool:skill.<name>.*` actions to the three risk allowances.
+
+## Workflow graph view
+
+The **Workflow Graph** panel shows the graph the current turn runs on and
+where it is. Every node shows its status (not started, running, waiting,
+completed, failed) and, while active, what it is doing: waiting for the model,
+calling a tool, running a generated graph or waiting for your approval.
+Finished nodes show their number of model decisions and tool calls. Generated
+graphs appear under the node that created them, with their explanation, the
+skill they came from and their own node states.
+
+While a request is running, the interface polls
+`GET /api/sessions/{id}/graph` every second. The backend registers an NLG run
+observer on each engine, so it sees the turn's task and the child tasks of
+generated graphs while they run, before they are saved. Without a running turn
+the view shows the turn waiting for approval, or else the latest turn.
 
 ## Long-term knowledge
 
@@ -226,6 +292,7 @@ model can read from, and any change can be reverted through the API.
 | `POST /api/providers/{provider}/models` | Model IDs the key can use `{api_key}` |
 | `POST /api/sessions` | Create a session |
 | `GET /api/sessions/{id}` | Session: risk level, folder, messages, pending approvals |
+| `GET /api/sessions/{id}/graph` | Workflow graph of the running, waiting or latest turn (`?task_id=` for another turn of the session) |
 | `PUT /api/sessions/{id}/risk-level` | Set the risk level `{risk_level}` |
 | `DELETE /api/sessions/{id}/workspace` | Revoke the report folder |
 | `POST /api/sessions/{id}/messages` | Run a turn `{api_key, message, provider?, model?}` |
@@ -277,6 +344,8 @@ fake SDK clients that return the SDKs' own response types.
 | `backend/app/providers/` | One module per model API: Chat Completions, Responses, Messages |
 | `backend/app/tools/` | Tool definitions and handlers |
 | `backend/app/journal.py` | Tool logs, audit trail and approvals from a turn's journal |
+| `backend/app/graph_view.py`, `backend/app/live.py` | Workflow graph view and the registry of running tasks |
+| `backend/skills/` | Agent Skills the assistant can use (survey-creator) |
 | `backend/app/sessions.py` | Session and turn storage |
 | `backend/config/` | Workflow, allowances and framework settings |
 | `backend/prompts/system_prompt.md` | The assistant's instructions (Chinese) |
@@ -297,8 +366,8 @@ git -C third_party/nlg fetch origin && git -C third_party/nlg checkout <commit>
 Then run the backend tests and commit the new submodule commit. Framework
 features exercised here: LLM nodes with ReAct, allowances and risk ceilings,
 schema-checked tools, human approvals that pause and resume a saved task, the
-task journal, task persistence, bounded prompts and long-term knowledge with
-review.
+task journal, task persistence, bounded prompts, long-term knowledge with
+review, Agent Skills, generated graphs and run observers.
 
 Gaps found while porting and fixed in the framework:
 
@@ -311,7 +380,24 @@ Gaps found while porting and fixed in the framework:
 - a ReAct action could not carry provider state (Gemini thought signatures,
   Claude thinking blocks, GPT reasoning items) to the next decision, so Gemini
   failed on its second tool call and the others lost their reasoning between
-  tool calls. Actions now have an opaque `model_state`.
+  tool calls. Actions now have an opaque `model_state`;
+- the host could not see the child task of a generated graph until the
+  `graph.create` call returned, so it could neither show its progress nor
+  tell which session a child task belonged to. `engine.add_run_observer` now
+  reports every node execution, including child ones.
+
+Found and handled in this app, not in the framework:
+
+- Child tasks of generated graphs carry the parent task's id, not the host's
+  metadata (here, the session id). Report tools resolve a child task's session
+  through the live task registry rather than trusting task data, which a
+  generated graph could write to.
+- ReAct history shortens every string to `prompt_max_value_chars`, which also
+  cuts skill instructions and files read with `skill.<name>.read` (and a graph
+  copied from a skill). `backend/config/memory_settings.json` raises it to
+  16000 and `prompt_budget_chars` to 48000 so whole skill files reach the
+  model. A per-tool limit in the framework would avoid making every prompt
+  larger.
 
 ### Comparing models
 
@@ -344,6 +430,10 @@ another model continues from the same history.
   across processes.
 - The assistant calls one tool per step.
 - Web search depends on DuckDuckGo and can be rate-limited.
+- The `graph.create` tool schema uses `$ref` and `anyOf`. Claude and GPT accept
+  it; whether Gemini's OpenAI-compatible endpoint does is untested.
+- The graph view is polled while a request runs; with several backend
+  processes it only sees turns running in the process that answers.
 - Tested offline with a scripted model and fake provider clients; behaviour
   with a real model depends on the model following the instructions in
   `system_prompt.md`.

@@ -14,6 +14,8 @@
 - [模型服务](#模型服务)
 - [权限与审批](#权限与审批)
 - [工具](#工具)
+- [技能：综述生成](#技能综述生成)
+- [工作流图视图](#工作流图视图)
 - [长期知识](#长期知识)
 - [HTTP API](#http-api)
 - [数据与隐私](#数据与隐私)
@@ -30,8 +32,11 @@ frontend (Next.js) ──HTTP──> backend (FastAPI)
                                    ├─ 每条消息对应一个 NLG 任务（"chat-turn" 工作流）
                                    ├─ 模型适配器 ── DeepSeek / Claude / GPT / Gemini
                                    ├─ 工具：web、data、text、reports
+                                   ├─ 技能：survey-creator（Agent Skills 包）
+                                   ├─ 生成图：经审核的子工作流（graph.create）
                                    ├─ allowance：risk-low / risk-medium / risk-high
-                                   └─ 知识库（经审核，跨对话共享）
+                                   ├─ 知识库（经审核，跨对话共享）
+                                   └─ 运行中任务登记 ── 工作流图视图
 ```
 
 - 你发送的每条消息都会启动一个 `chat-turn` 工作流任务（`backend/config/workflow.json`）：
@@ -173,9 +178,51 @@ cd frontend && npm install && npm run dev
 | `reports.delete` | high | 每次调用 | 删除一份报告 |
 | `knowledge.list` / `read` / `search` | low | – | 读取经审核的知识 |
 | `knowledge.propose` | medium | 审核队列 | 提出知识变更（见下文） |
+| `skill.survey-creator.invoke` / `read` / `finish` | low | – | 打开综述技能、读取其中的文件、关闭技能 |
+| `skill.survey-creator.script` | high | 每次调用 | 运行技能中的 `scripts/check_survey.py` |
+| `graph.create` | high | 每个图 | 把经审核的工作流图作为子任务运行 |
 
 工具运行前会按其 JSON schema 校验参数；错误会返回给模型，以便它修正调用。文件名只能是不含目录的普通名称。
 新增工具请参考 `skills/adding-tools/SKILL.md`。
+
+## 技能：综述生成
+
+`backend/skills/survey-creator/` 是一个 [Agent Skills](https://agentskills.io/specification) 技能包，
+用于撰写学术综述（文献综述论文）：确定综述范围，用网络搜索收集并筛选文献，建立分类体系和对比表，
+最后把带引用的 Markdown 综述保存到已批准的目录。NLG 通过 `register_skill` 注册它，把它变成普通工具，
+和其他工具一样受会话风险级别约束。
+
+| 文件 | 内容 |
+| --- | --- |
+| `SKILL.md` | `invoke` 返回的说明：基本规则（绝不编造文献）、八个步骤、工作流图选项 |
+| `templates/outline.md` | 综述的章节规划 |
+| `references/structure.md` | 如何建立分类体系、对比表以及挑战与展望 |
+| `references/citations.md` | 数字引用格式、类 APA 与 GB/T 7714-2015 参考文献格式 |
+| `graphs/survey-pipeline.json` / `.md` | 流水线图及其使用场景，格式与 NLG 把图保存进技能时相同 |
+| `scripts/check_survey.py` | 检查已保存的综述：章节、引用编号、缺少链接的参考文献、文献新近程度 |
+
+在对话中提出要求即可，例如“写一篇关于检索增强生成的综述”。具体过程取决于风险级别：
+
+- **low / medium**：助手打开技能，读取需要的文件，自己完成各个步骤。保存报告需要 medium。
+- **high**：额外提供两个工具。`graph_create` 把技能中的四阶段流水线（确定范围 → 收集文献 → 组织结构 → 撰写）
+  作为生成图运行：运行前你会在审批卡片中看到各阶段及其权限，运行时工作流图视图会跟踪子任务。
+  研究阶段使用 `survey-research` allowance（只能搜索和读取技能），撰写阶段使用 `survey-writer`（另可保存和编辑报告）。
+  之后 `skill_survey-creator_script` 会对保存的文件运行检查脚本，同样需要你批准。
+
+这里用到的 NLG 功能：技能调用、限定在技能包内的文件读取与路径检查、子任务中的技能调用、按哈希固定并需人工批准的脚本、
+带 allowance 子集检查和审核的生成图、子任务审批转交给父任务，以及日志和审计记录中的技能活动。
+
+要添加其他技能，把技能包放到 `backend/skills/<名称>/`，在 `backend/app/tools/__init__.py` 的 `SKILLS` 中登记它及可运行的脚本，
+并把对应的 `tool:skill.<名称>.*` 动作加入三个风险 allowance。
+
+## 工作流图视图
+
+**Workflow Graph** 面板显示当前一轮运行所在的工作流图以及进行到哪一步。每个节点显示状态（未开始、运行中、等待、完成、失败），
+运行或等待时还会显示正在做什么：等待模型决策、调用工具、运行生成的子图或等待你确认。已完成的节点显示模型决策次数和工具调用次数。
+生成图显示在创建它的节点下方，附带说明、来源技能以及自己的节点状态。
+
+请求进行期间，界面每秒轮询一次 `GET /api/sessions/{id}/graph`。后端在每个引擎上注册了 NLG 运行观察者，
+因此能在任务保存之前看到本轮任务以及生成图子任务的实时状态。没有正在运行的一轮时，视图显示等待审批的一轮，否则显示最近一轮。
 
 ## 长期知识
 
@@ -193,6 +240,7 @@ cd frontend && npm install && npm run dev
 | `POST /api/providers/{provider}/models` | 该 Key 可用的模型 ID `{api_key}` |
 | `POST /api/sessions` | 创建会话 |
 | `GET /api/sessions/{id}` | 会话：风险级别、目录、消息、待审批请求 |
+| `GET /api/sessions/{id}/graph` | 正在运行、等待审批或最近一轮的工作流图（`?task_id=` 指定本会话的其他轮次） |
 | `PUT /api/sessions/{id}/risk-level` | 设置风险级别 `{risk_level}` |
 | `DELETE /api/sessions/{id}/workspace` | 撤销报告目录 |
 | `POST /api/sessions/{id}/messages` | 运行一轮 `{api_key, message, provider?, model?}` |
@@ -237,6 +285,8 @@ cd frontend && npx tsc --noEmit && npm run build
 | `backend/app/providers/` | 每种模型 API 一个模块：Chat Completions、Responses、Messages |
 | `backend/app/tools/` | 工具定义和处理函数 |
 | `backend/app/journal.py` | 从每轮日志生成工具记录、审计记录和审批请求 |
+| `backend/app/graph_view.py`、`backend/app/live.py` | 工作流图视图和运行中任务的登记 |
+| `backend/skills/` | 助手可以使用的 Agent Skills（survey-creator） |
 | `backend/app/sessions.py` | 会话和对话轮次的存储 |
 | `backend/config/` | 工作流、allowance 和框架设置 |
 | `backend/prompts/system_prompt.md` | 助手的指令（中文） |
@@ -255,7 +305,7 @@ git -C third_party/nlg fetch origin && git -C third_party/nlg checkout <commit>
 
 然后运行后端测试，并提交新的子模块提交。这里用到的框架功能有：带 ReAct 的 LLM 节点、allowance 与风险上限、
 按 schema 校验的工具、可暂停并在保存后恢复任务的人工审批、任务日志、任务持久化、受限大小的提示词，
-以及带审核的长期知识。
+带审核的长期知识、Agent Skills、生成图以及运行观察者。
 
 迁移过程中发现并已在框架中修复的问题：
 
@@ -264,7 +314,17 @@ git -C third_party/nlg fetch origin && git -C third_party/nlg checkout <commit>
 - 框架无法通过 `pip install -e` 安装；
 - 知识整理看不到待审核的提案，导致相邻两轮重复提出同一个页面；
 - ReAct 动作无法把服务商状态（Gemini 的 thought signature、Claude 的 thinking 块、GPT 的推理条目）带到下一次决策，
-  导致 Gemini 在第二次工具调用时失败，其他模型在工具调用之间丢失推理过程。现在动作带有不透明的 `model_state`。
+  导致 Gemini 在第二次工具调用时失败，其他模型在工具调用之间丢失推理过程。现在动作带有不透明的 `model_state`；
+- 在 `graph.create` 调用返回之前，宿主看不到生成图的子任务，因此既无法显示其进度，也无法判断子任务属于哪个会话。
+  现在 `engine.add_run_observer` 会报告每个节点 execution，包括子任务中的。
+
+在本应用中发现并处理、未改动框架的问题：
+
+- 生成图的子任务只带有父任务的 id，不带宿主的元数据（这里是会话 id）。报告工具通过运行中任务的登记查找子任务所属的会话，
+  而不信任任务数据，因为生成图可以写入任务数据。
+- ReAct 历史会把每个字符串截断到 `prompt_max_value_chars`，技能说明、用 `skill.<名称>.read` 读取的文件（以及从技能复制的图）
+  也会被截断。`backend/config/memory_settings.json` 把它提高到 16000，并把 `prompt_budget_chars` 提高到 48000，
+  使完整的技能文件能到达模型。如果框架支持按工具设置上限，就不必让每个提示词都变大。
 
 ### 比较不同模型
 
@@ -289,4 +349,6 @@ git -C third_party/nlg fetch origin && git -C third_party/nlg checkout <commit>
 - 只支持一个后端进程：同一会话的轮次在进程内串行执行，不跨进程协调。
 - 助手每一步只调用一个工具。
 - 网络搜索依赖 DuckDuckGo，可能被限流。
+- `graph.create` 工具的 schema 使用了 `$ref` 和 `anyOf`。Claude 和 GPT 可以接受；Gemini 的 OpenAI 兼容接口是否接受尚未测试。
+- 工作流图视图在请求进行期间轮询；有多个后端进程时，只能看到由应答进程运行的轮次。
 - 使用脚本化模型和假的服务商客户端离线测试；接入真实模型后的表现取决于模型是否遵循 `system_prompt.md` 中的指令。

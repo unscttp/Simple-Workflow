@@ -19,6 +19,13 @@ AUDIT_EVENT_TYPES = {
     "knowledge.proposed": "Knowledge change proposed",
     "knowledge.consolidation_failed": "Knowledge consolidation failed",
     "node.timed_out": "Turn timed out",
+    "skill.invoke.opened": "Skill opened",
+    "skill.invoke.closed": "Skill closed",
+    "skill.script.exited": "Skill script ran",
+    "graph.created": "Generated graph approved",
+    "graph.completed": "Generated graph finished",
+    "graph.failed": "Generated graph failed",
+    "skill.graph.saved": "Graph saved to skill",
 }
 
 
@@ -79,8 +86,8 @@ def _summary(kind: str, details: dict) -> str:
     title = AUDIT_EVENT_TYPES[kind]
     if kind == "approval.resolved":
         return f"{title}: {'approved' if details.get('approved') else 'rejected'}"
-    for key in ("filename", "folder", "page", "message", "error"):
-        if details.get(key):
+    for key in ("filename", "folder", "page", "message", "error", "path", "graph_id", "skill"):
+        if details.get(key) and isinstance(details[key], str):
             return f"{title}: {details[key]}"
     if kind == "knowledge.proposed":
         return f"{title}: {', '.join(details.get('pages', []))} ({details.get('status')})"
@@ -100,11 +107,21 @@ def audit_entries(task: Task) -> list[dict]:
 
 
 def pending_approvals(task: Task) -> list[dict]:
-    """Requests the user must decide on, with what they would allow."""
+    """Requests the user must decide on, with what they would allow.
+
+    Approvals needed inside a generated graph are forwarded to the turn as
+    ``child_graph_review``; they are shown as the request they wrap, with
+    ``via_graph`` naming the graph.
+    """
     approvals = []
     for request in pending_human_checks(task):
         details = request["details"]
+        via_graph = None
+        if details.get("kind") == "child_graph_review":
+            via_graph = details.get("graph_id")
+            details = details["child_request"]["details"]
         tool = details.get("tool") or {}
+        graph = details.get("graph")
         approvals.append(
             {
                 "id": request["id"],
@@ -114,6 +131,23 @@ def pending_approvals(task: Task) -> list[dict]:
                 "risk_level": tool.get("risk_level"),
                 "arguments": details.get("arguments", {}),
                 "safety_context": details.get("safety_context"),
+                "via_graph": via_graph,
+                "explanation": details.get("explanation"),
+                "skill": (details.get("skill") or {}).get("name"),
+                "graph": None
+                if graph is None
+                else {
+                    "nodes": [
+                        {
+                            "id": node["id"],
+                            "name": node.get("name") or node["id"],
+                            "allowance": node.get("allowance"),
+                        }
+                        for node in graph["nodes"]
+                    ],
+                    "edges": [{"from": e["from"], "to": e["to"]} for e in graph["edges"]],
+                },
+                "path": details.get("path"),
             }
         )
     return approvals

@@ -270,6 +270,7 @@ class ConfigurationTests(ApiCase):
         agent = self.app.state.agent
         names = {f"tool:{tool.name}" for tool in agent.tools.list_tools()}
         names |= {f"tool:knowledge.{op}" for op in ("list", "read", "search", "propose")}
+        names.add("tool:graph.create")
         for level in ("low", "medium", "high"):
             allowance = agent.allowances.resolve(f"risk-{level}")
             self.assertEqual(set(allowance.actions), names, level)

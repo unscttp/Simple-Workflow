@@ -43,6 +43,51 @@ export type Approval = {
   risk_level: RiskLevel | "critical" | null;
   arguments: Record<string, unknown>;
   safety_context?: Record<string, unknown> | null;
+  via_graph?: string | null; // set when the request comes from inside a generated graph
+  explanation?: string | null;
+  skill?: string | null;
+  graph?: { nodes: { id: string; name: string; allowance: string | null }[]; edges: GraphEdge[] } | null;
+  path?: string | null;
+};
+
+export type NodeStatus = "pending" | "ready" | "running" | "waiting" | "completed" | "failed" | "skipped";
+
+export type NodeActivity = { kind: "model" | "tool" | "graph" | "approval"; tool?: string };
+
+export type GraphNode = {
+  id: string;
+  type: string | null;
+  name: string;
+  allowance: string | null;
+  status: NodeStatus;
+  attempts: number;
+  decisions: number;
+  tool_calls: number;
+  activity: NodeActivity | null;
+  error?: string | null;
+};
+
+export type GraphEdge = { from: string; to: string; label?: string | null };
+
+export type GraphView = {
+  id: string;
+  title: string;
+  parent: { graph: string; node: string } | null;
+  depth: number;
+  explanation: string | null;
+  skill: string | null;
+  status: string;
+  start: string[];
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+};
+
+export type TaskGraph = {
+  task_id: string | null;
+  status: string;
+  running: boolean;
+  graphs: GraphView[];
+  current: ({ graph: string; node: string; status: NodeStatus } & NodeActivity)[];
 };
 
 export type Session = {
@@ -154,6 +199,7 @@ export const api = {
       method: "POST",
       body: json({ ...choice, approved, comment }),
     }),
+  graph: (id: string) => request<TaskGraph>(`/api/sessions/${id}/graph`),
   knowledge: () => request<Knowledge>("/api/knowledge"),
   knowledgePage: (page: string) =>
     request<{ page: string; version: number; content: string }>(`/api/knowledge/pages/${page}`),
