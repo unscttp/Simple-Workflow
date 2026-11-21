@@ -21,6 +21,12 @@ const RISK_LABELS: Record<RiskLevel, string> = {
 const TOOL_LABELS: Record<string, string> = {
   "workspace.request_access": "申请报告目录权限",
   "reports.delete": "删除报告",
+  "skill.survey-creator.script": "运行综述检查脚本",
+};
+
+const KIND_LABELS: Record<string, string> = {
+  graph_creation: "运行生成的工作流图",
+  skill_graph_save: "把工作流图保存到技能",
 };
 
 function Card({ title, children, extra }: { title: string; children: React.ReactNode; extra?: string }) {
@@ -108,11 +114,41 @@ export function ApprovalCard({
   onDecide: (approved: boolean, comment: string) => void;
 }) {
   const [comment, setComment] = useState("");
-  const label = (approval.tool_name && TOOL_LABELS[approval.tool_name]) || approval.tool_name || approval.kind;
+  const label =
+    KIND_LABELS[approval.kind] ||
+    (approval.tool_name && TOOL_LABELS[approval.tool_name]) ||
+    approval.tool_name ||
+    approval.kind;
   return (
     <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-900">
       <p className="font-semibold">需要你的确认：{label}</p>
+      {approval.via_graph && (
+        <p className="mt-1 text-xs text-amber-800">
+          来自生成的工作流图 <span className="font-mono">{approval.via_graph}</span>
+        </p>
+      )}
       {approval.description && <p className="mt-1 text-xs text-amber-800">{approval.description}</p>}
+      {approval.explanation && <p className="mt-1 text-xs text-amber-800">{approval.explanation}</p>}
+      {approval.skill && (
+        <p className="mt-1 text-xs text-amber-800">
+          技能：<span className="font-mono">{approval.skill}</span>
+        </p>
+      )}
+      {approval.graph && (
+        <ol className="mt-2 space-y-1 text-xs">
+          {approval.graph.nodes.map((node, index) => (
+            <li key={node.id} className="flex gap-2">
+              <span className="font-mono text-amber-700">{index + 1}.</span>
+              <span className="font-semibold">{node.name}</span>
+              <span className="font-mono text-amber-700">
+                {node.id}
+                {node.allowance ? ` · ${node.allowance}` : ""}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {approval.path && <p className="mt-1 break-all font-mono text-xs">{approval.path}</p>}
       <dl className="mt-3 space-y-1 text-xs">
         {Object.entries(approval.arguments).map(([key, value]) => (
           <div key={key} className="flex gap-2">

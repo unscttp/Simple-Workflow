@@ -7,13 +7,22 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 RiskLevel = Literal["low", "medium", "high"]
+ProviderId = Literal["deepseek", "anthropic", "openai", "gemini"]
 
 
-class ModelCredentials(BaseModel):
+class ApiKey(BaseModel):
     api_key: str = Field(
-        ..., min_length=1, description="The user's own model API key. Never stored."
+        ..., min_length=1, description="The user's own API key for the provider. Never stored."
     )
-    model: str | None = Field(default=None, description="Model name; defaults to SW_DEFAULT_MODEL.")
+
+
+class ModelCredentials(ApiKey):
+    provider: ProviderId | None = Field(
+        default=None, description="Model provider; defaults to SW_DEFAULT_PROVIDER."
+    )
+    model: str | None = Field(
+        default=None, description="Model ID; defaults to the provider's default model."
+    )
 
 
 class MessageRequest(ModelCredentials):
@@ -39,6 +48,7 @@ class ChatMessage(BaseModel):
     content: str
     task_id: str | None = None
     at: str | None = None
+    model: str | None = None  # "provider/model" that wrote an assistant message
 
 
 class SessionView(BaseModel):
@@ -57,9 +67,27 @@ class TurnResponse(BaseModel):
     tool_logs: list[dict[str, Any]]
     audit_entries: list[dict[str, Any]]
     pending_approvals: list[dict[str, Any]]
+    stats: dict[str, Any]
     session: SessionView
 
 
 class KnowledgeView(BaseModel):
     pages: list[dict[str, Any]]
     proposals: list[dict[str, Any]]
+
+
+class ProviderView(BaseModel):
+    id: ProviderId
+    label: str
+    default_model: str
+    key_hint: str
+
+
+class ProvidersView(BaseModel):
+    default: ProviderId
+    providers: list[ProviderView]
+
+
+class ModelList(BaseModel):
+    provider: ProviderId
+    models: list[str]

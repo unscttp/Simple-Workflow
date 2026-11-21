@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import unittest
 
-from app.model import ModelError
+from fastapi.testclient import TestClient
 
-from .support import API_KEY, ApiCase, answer, call
+from app.main import create_app
+from app.providers import ModelError
+
+from .support import API_KEY, ApiCase, answer, call, last_result
 
 
 class ChatTests(ApiCase):
@@ -18,8 +21,9 @@ class ChatTests(ApiCase):
             [(m["role"], m["content"]) for m in turn["session"]["messages"]],
             [("user", "你好"), ("assistant", "你好！")],
         )
-        messages, tools = self.model.requests[0]
-        self.assertEqual(messages[-1], {"role": "user", "content": "你好"})
+        seen = self.model.turns[0]
+        self.assertTrue(seen.message.startswith("你好\n\n"))
+        self.assertEqual(seen.conversation, [])
         self.assertIn("reports_save", self.model.tool_names())
         self.assertNotIn("reports_delete", self.model.tool_names())  # default risk is medium
 
@@ -28,14 +32,12 @@ class ChatTests(ApiCase):
         turn = self.send(
             "搜索 agent 趋势",
             call("web_search", query="agent trends"),
-            lambda messages, tools: answer(
-                json.loads(messages[-1]["content"])["results"][0]["title"]
-            ),
+            lambda turn: answer(last_result(turn)["results"][0]["title"]),
         )
         self.assertEqual(turn["answer"], "Agent trends")
-        messages = self.model.requests[-1][0]
-        self.assertEqual([m["role"] for m in messages[1:3]], ["user", "assistant"])
-        self.assertEqual(messages[-2]["tool_calls"][0]["function"]["name"], "web_search")
+        seen = self.model.turns[-1]
+        self.assertEqual([m["role"] for m in seen.conversation], ["user", "assistant"])
+        self.assertEqual(seen.steps[-1].tool, "web_search")
         (log,) = turn["tool_logs"]
         self.assertEqual((log["tool_name"], log["status"]), ("web.search", "completed"))
 
@@ -44,14 +46,14 @@ class ChatTests(ApiCase):
             "分析",
             call("data_analyze_trend", data_json="not json"),
             call("data_analyze_trend", data_json="[1, 2, 4]"),
-            lambda messages, tools: answer(str(json.loads(messages[-1]["content"])["mean"])),
+            lambda turn: answer(str(last_result(turn)["mean"])),
         )
         self.assertEqual(turn["answer"], "2.3333")
         self.assertEqual([log["status"] for log in turn["tool_logs"]], ["failed", "completed"])
         self.assertIn("ValueError", turn["tool_logs"][0]["output"])
 
     def test_model_error_fails_the_turn_without_leaking_the_key(self):
-        def broken(messages, tools):
+        def broken(turn):
             raise ModelError("Model request failed with HTTP 401.")
 
         turn = self.send("你好", broken)
@@ -116,7 +118,7 @@ class ApprovalTests(ApiCase):
         turn = self.send(
             "保存",
             call("reports_save", title="t", content="c", format="md"),
-            lambda messages, tools: answer(json.loads(messages[-1]["content"])["error"]["type"]),
+            lambda turn: answer(last_result(turn)["error"]["type"]),
         )
         self.assertEqual(turn["answer"], "PermissionError")
         self.assertFalse(self.reports.exists())
@@ -152,7 +154,7 @@ class ApprovalTests(ApiCase):
         turn = self.decide(
             turn["pending_approvals"][0]["id"],
             True,
-            lambda messages, tools: answer(json.loads(messages[-1]["content"])["error"]["message"]),
+            lambda turn: answer(last_result(turn)["error"]["message"]),
         )
         self.assertIn("System folders", turn["answer"])
         self.assertIsNone(turn["session"]["workspace"])
@@ -164,7 +166,7 @@ class ApprovalTests(ApiCase):
         turn = self.send(
             "列出报告",
             call("reports_list"),
-            lambda messages, tools: answer(json.loads(messages[-1]["content"])["error"]["type"]),
+            lambda turn: answer(last_result(turn)["error"]["type"]),
         )
         self.assertEqual(turn["answer"], "PermissionError")
 
@@ -188,7 +190,7 @@ class RiskLevelTests(ApiCase):
         turn = self.send(
             "保存",
             call("reports_save", title="t", content="c", format="md"),
-            lambda messages, tools: answer(json.loads(messages[-1]["content"])["error"]["message"]),
+            lambda turn: answer(last_result(turn)["error"]["message"]),
         )
         self.assertIn("exceeds allowance", turn["answer"])
         self.assertEqual(list(self.reports.iterdir()), [])
@@ -202,7 +204,7 @@ class RiskLevelTests(ApiCase):
         turn = self.decide(
             turn["pending_approvals"][0]["id"],
             True,
-            lambda messages, tools: answer(json.loads(messages[-1]["content"])["error"]["type"]),
+            lambda turn: answer(last_result(turn)["error"]["type"]),
         )
         self.assertEqual(turn["answer"], "PermissionError")
         self.assertTrue((self.reports / "old.md").exists())
@@ -218,8 +220,8 @@ class KnowledgeTests(ApiCase):
     knowledge_consolidation = True
 
     def test_turn_lessons_wait_for_review_then_reach_later_turns(self):
-        def propose(messages):
-            request = json.loads(messages[-1]["content"])
+        def propose(system, user):
+            request = json.loads(user)
             evidence = [
                 e["id"] for e in request["task_memory"]["events"] if e["type"] == "tool.completed"
             ]
@@ -237,8 +239,7 @@ class KnowledgeTests(ApiCase):
                 "evidence": evidence,
             }
 
-        self.model.json_replies.append(None)
-        self.model.complete_json = lambda messages: propose(messages)
+        self.model.json_reply = propose
         self.send(
             "搜索 agent 趋势", call("web_search", query="agent"), answer("Agent 普遍使用工具。")
         )
@@ -255,7 +256,7 @@ class KnowledgeTests(ApiCase):
         page = self.client.get("/api/knowledge/pages/assistant/agents").json()
         self.assertIn("Agent 普遍使用工具。", page["content"])
 
-        self.model.complete_json = lambda messages: {"operations": []}
+        self.model.json_reply = lambda system, user: {"operations": []}
         self.send("agent 有什么特点？", answer("见知识库。"))
         self.assertEqual(self.model.context()["knowledge"]["pages"][0]["page"], "assistant/agents")
 
@@ -269,10 +270,71 @@ class ConfigurationTests(ApiCase):
         agent = self.app.state.agent
         names = {f"tool:{tool.name}" for tool in agent.tools.list_tools()}
         names |= {f"tool:knowledge.{op}" for op in ("list", "read", "search", "propose")}
+        names.add("tool:graph.create")
         for level in ("low", "medium", "high"):
             allowance = agent.allowances.resolve(f"risk-{level}")
             self.assertEqual(set(allowance.actions), names, level)
             self.assertEqual(allowance.max_tool_risk, level)
+
+
+class ProviderTests(ApiCase):
+    def test_providers_and_their_models(self):
+        view = self.client.get("/api/providers").json()
+        self.assertEqual(view["default"], "deepseek")
+        self.assertEqual(
+            [p["id"] for p in view["providers"]], ["deepseek", "anthropic", "openai", "gemini"]
+        )
+        self.assertEqual(view["providers"][1]["default_model"], "claude-opus-5-5")
+        self.assertNotIn("base_url", view["providers"][0])
+
+        listed = self.client.post("/api/providers/gemini/models", json={"api_key": API_KEY})
+        self.assertEqual(
+            listed.json(), {"provider": "gemini", "models": ["gemini-model-a", "gemini-model-b"]}
+        )
+        missing = self.client.post("/api/providers/nope/models", json={"api_key": API_KEY})
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(self.client.post("/api/providers/openai/models", json={}).status_code, 422)
+
+    def test_listing_errors_do_not_leak_the_key(self):
+        def failing(provider, key):
+            raise ModelError("Listing models failed with HTTP 401.")
+
+        client = TestClient(
+            create_app(
+                self.app.state.agent.settings, model_factory=self.factory, model_lister=failing
+            )
+        )
+        response = client.post("/api/providers/openai/models", json={"api_key": API_KEY})
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn(API_KEY, response.text)
+
+    def test_each_request_chooses_its_model(self):
+        self.send("一", answer("a"))
+        self.send("二", answer("b"), provider="anthropic")
+        self.send("三", answer("c"), provider="gemini", model="gemini-custom")
+        self.assertEqual(
+            self.factory_calls,
+            [
+                ("deepseek", API_KEY, "deepseek-chat"),
+                ("anthropic", API_KEY, "claude-opus-5-5"),
+                ("gemini", API_KEY, "gemini-custom"),
+            ],
+        )
+        self.send("四", status=422, provider="mistral")
+
+    def test_stats_and_model_labels(self):
+        turn = self.send(
+            "保存",
+            call("workspace_request_access", folder=str(self.reports), purpose="保存报告"),
+        )
+        self.assertEqual(turn["stats"]["decisions"], 1)
+        turn = self.decide(turn["pending_approvals"][0]["id"], True, answer("好了"))
+        stats = turn["stats"]
+        self.assertEqual(stats["models"], [{"provider": "scripted", "model": "scripted-model"}])
+        self.assertEqual((stats["decisions"], stats["tokens"], stats["tool_calls"]), (2, 20, 1))
+        self.assertFalse(stats["tokens_estimated"])
+        self.assertEqual(turn["session"]["messages"][-1]["model"], "scripted/scripted-model")
+        self.assertIsNone(turn["session"]["messages"][0]["model"])
 
 
 if __name__ == "__main__":

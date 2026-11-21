@@ -1,0 +1,17 @@
+{
+  "id": "survey-writer",
+  "description": "Writing stage of the survey pipeline graph: everything in survey-research plus saving and editing reports in the approved folder.",
+  "actions": [
+    "tool:web.search",
+    "tool:text.keywords",
+    "tool:skill.survey-creator.invoke",
+    "tool:skill.survey-creator.read",
+    "tool:skill.survey-creator.finish",
+    "tool:reports.list",
+    "tool:reports.read",
+    "tool:reports.save",
+    "tool:reports.edit"
+  ],
+  "max_tool_risk": "medium",
+  "config": {}
+}

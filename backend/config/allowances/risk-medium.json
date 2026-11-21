@@ -15,7 +15,12 @@
     "tool:knowledge.list",
     "tool:knowledge.read",
     "tool:knowledge.search",
-    "tool:knowledge.propose"
+    "tool:knowledge.propose",
+    "tool:skill.survey-creator.invoke",
+    "tool:skill.survey-creator.read",
+    "tool:skill.survey-creator.finish",
+    "tool:skill.survey-creator.script",
+    "tool:graph.create"
   ],
   "max_tool_risk": "medium",
   "config": {}

@@ -9,9 +9,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from docx import Document
-from workflow_core import NodeResult, ReActAction
+from workflow_core import MeteredDecision, NodeResult
 
-from app.model import AgentAdapter, ModelReply, ToolCall, function_name, native_tools
+from app.model import NO_ANSWER, AgentAdapter, _digest, native_tools
+from app.providers.base import Reply, ToolCall, function_name
 from app.sessions import SessionStore
 from app.tools import analysis
 from app.tools.documents import edit_docx, edit_markdown, read_text, write_docx, write_pdf
@@ -115,7 +116,7 @@ class ReportFileTests(unittest.TestCase):
 
 
 class AdapterTests(unittest.TestCase):
-    def payload(self, history=()):
+    def payload(self, history=(), **extra):
         return {
             "available_tools": [
                 {
@@ -128,45 +129,109 @@ class AdapterTests(unittest.TestCase):
             "inputs": {
                 "message": "hi",
                 "conversation": [{"role": "user", "content": "earlier"}],
-                "workspace": None,
+                "workspace": "/reports",
             },
             "task_memory": {"events": []},
             "knowledge": None,
             "history": list(history),
+            **extra,
         }
 
-    def test_names_descriptions_and_replies(self):
+    @staticmethod
+    def prompt(payload):
+        return [{"role": "system", "content": ""}, {"role": "user", "content": json.dumps(payload)}]
+
+    def test_tool_names_and_descriptions(self):
         tools, names = native_tools(self.payload()["available_tools"])
         self.assertEqual(names, {"reports_delete": "reports.delete"})
-        self.assertIn("approval", tools[0]["function"]["description"])
+        self.assertIn("approval", tools[0].description)
         self.assertEqual(function_name("mcp:docs:search"), "mcp_docs_search")
+        clash = [{"name": n, "description": "", "input_schema": {}} for n in ("a.b", "a:b")]
+        with self.assertRaises(ValueError):
+            native_tools(clash)
 
+    def test_turns_carry_state_and_a_frozen_context(self):
         replies = [
-            ModelReply(tool_calls=[ToolCall("reports_delete", {"filename": "a.md"})]),
-            ModelReply(text="done"),
+            Reply(
+                tool_call=ToolCall("reports_delete", {"filename": "a.md"}),
+                state={"call_id": "c1", "secret_sauce": 1},
+                total_tokens=7,
+            ),
+            Reply(text="done"),
         ]
-        seen = []
+        turns = []
         model = SimpleNamespace(
-            complete=lambda messages, tools: seen.append(messages) or replies.pop(0)
+            provider="p", model="m", decide=lambda turn: turns.append(turn) or replies.pop(0)
         )
         adapter = AgentAdapter(model, "PROMPT")
-        message = [
-            {"role": "system", "content": ""},
-            {"role": "user", "content": json.dumps(self.payload())},
-        ]
-        self.assertEqual(adapter(message), ReActAction("tool:reports.delete", {"filename": "a.md"}))
-        history = [
-            {
-                "action": {"name": "tool:reports.delete", "arguments": {"filename": "a.md"}},
-                "observation": {"deleted": True},
-            }
-        ]
-        message[1]["content"] = json.dumps(self.payload(history))
-        self.assertEqual(adapter(message), NodeResult(values={"answer": "done"}))
-        chat = seen[-1]
-        self.assertTrue(chat[0]["content"].startswith("PROMPT"))
-        self.assertEqual([m["role"] for m in chat[1:]], ["user", "user", "assistant", "tool"])
-        self.assertEqual(chat[-2]["tool_calls"][0]["function"]["name"], "reports_delete")
+
+        first = adapter(self.prompt(self.payload()))
+        self.assertIsInstance(first, MeteredDecision)
+        self.assertEqual(first.total_tokens, 7)
+        action = first.decision
+        self.assertEqual(
+            (action.name, action.arguments), ("tool:reports.delete", {"filename": "a.md"})
+        )
+        self.assertEqual(action.model_state["call_id"], "c1")
+        self.assertEqual(action.model_state["context"]["workspace"], "/reports")
+        self.assertTrue(turns[0].system.startswith("PROMPT"))
+        self.assertEqual(turns[0].conversation, [{"role": "user", "content": "earlier"}])
+        self.assertTrue(turns[0].message.startswith("hi\n\n"))
+
+        # The folder changed meanwhile; the turn keeps the context it started with.
+        later = self.payload(
+            [
+                {
+                    "action": {"name": "tool:reports.delete", "arguments": {"filename": "a.md"}},
+                    "observation": {"deleted": True},
+                    "model_state": action.model_state,
+                }
+            ]
+        )
+        later["inputs"]["workspace"] = "/elsewhere"
+        self.assertEqual(adapter(self.prompt(later)), NodeResult(values={"answer": "done"}))
+        second = turns[1]
+        self.assertEqual(second.message, turns[0].message)
+        self.assertTrue(second.replay_safe)
+        (step,) = second.steps
+        self.assertEqual((step.tool, step.call_id), ("reports_delete", "c1"))
+        self.assertEqual(json.loads(step.output), {"deleted": True})
+        self.assertEqual(step.state, {"call_id": "c1", "secret_sauce": 1})
+
+    def test_replay_is_unsafe_after_omitted_steps_or_changed_tools(self):
+        turns = []
+        model = SimpleNamespace(
+            provider="p", model="m", decide=lambda turn: turns.append(turn) or Reply(text="")
+        )
+        adapter = AgentAdapter(model, "PROMPT")
+        entry = {
+            "action": {"name": "tool:reports.delete", "arguments": {}},
+            "observation": {"error": "nope"},
+            "model_state": {"call_id": "c1", "prefix": "stale"},
+        }
+        self.assertEqual(adapter(self.prompt(self.payload([entry]))).values["answer"], NO_ANSWER)
+        self.assertFalse(turns[-1].replay_safe)
+        self.assertTrue(turns[-1].steps[0].is_error)
+        self.assertIsNone(turns[-1].steps[0].state.get("prefix"))
+
+        tools, _ = native_tools(self.payload()["available_tools"])
+        entry["model_state"]["prefix"] = _digest("p/m", adapter.system, tools)
+        adapter(self.prompt(self.payload([entry])))
+        self.assertTrue(turns[-1].replay_safe)
+        adapter(self.prompt(self.payload([entry], history_omitted_older_steps=2)))
+        self.assertFalse(turns[-1].replay_safe)
+        model.model = "other"  # e.g. a different model chosen when approving
+        adapter(self.prompt(self.payload([entry])))
+        self.assertFalse(turns[-1].replay_safe)
+
+    def test_hidden_tools_keep_their_names(self):
+        model = SimpleNamespace(
+            provider="p",
+            model="m",
+            decide=lambda turn: Reply(tool_call=ToolCall("reports_save", {}), state={}),
+        )
+        adapter = AgentAdapter(model, "PROMPT", known_tools=["reports.save"])
+        self.assertEqual(adapter(self.prompt(self.payload())).name, "tool:reports.save")
 
 
 if __name__ == "__main__":

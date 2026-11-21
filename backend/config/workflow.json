@@ -10,6 +10,7 @@
     {
       "id": "assistant",
       "type": "assistant",
+      "name": "Chat assistant",
       "inputs": {
         "message": "/message",
         "conversation": "/conversation",
@@ -29,7 +30,8 @@
         "propose": [
           "assistant"
         ]
-      }
+      },
+      "allow_create_graph": true
     }
   ]
 }

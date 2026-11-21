@@ -1,0 +1,125 @@
+"""Chat Completions API: DeepSeek, and Gemini through Google's OpenAI-compatible endpoint.
+
+Two pieces of state are carried between tool calls of a turn when the
+provider returns them:
+
+* Gemini attaches a thought signature to each tool call
+  (``extra_content.google.thought_signature``) and rejects a later request
+  whose tool-call history lacks it;
+* DeepSeek thinking models return ``reasoning_content``, which is sent back
+  on the assistant tool-call message of the same turn.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from .base import Reply, ToolCall, Turn, parse_arguments, parse_json_object
+
+JSON_NOTE = "\n\nRespond with a single JSON object and nothing else."
+
+
+def wrap_openai_errors(call):
+    """Run an OpenAI SDK call, re-raising failures without their message text."""
+    import openai
+
+    from .base import ModelError
+
+    try:
+        return call()
+    except openai.APIStatusError as exc:
+        raise ModelError(f"Model request failed with HTTP {exc.status_code}.") from None
+    except openai.APIError as exc:
+        raise ModelError(f"Model request failed: {type(exc).__name__}.") from None
+
+
+class ChatCompletionsModel:
+    def __init__(
+        self,
+        provider: str,
+        model: str,
+        client: Any,
+        *,
+        temperature: float | None = None,
+    ) -> None:
+        self.provider = provider
+        self.model = model
+        self._client = client
+        self._temperature = temperature
+
+    def __repr__(self) -> str:
+        return f"ChatCompletionsModel(provider={self.provider!r}, model={self.model!r})"
+
+    def _create(self, **request):
+        if self._temperature is not None:
+            request["temperature"] = self._temperature
+        return wrap_openai_errors(
+            lambda: self._client.chat.completions.create(model=self.model, **request)
+        )
+
+    @staticmethod
+    def messages(turn: Turn) -> list[dict]:
+        messages = [{"role": "system", "content": turn.system}, *turn.conversation]
+        messages.append({"role": "user", "content": turn.message})
+        for step in turn.steps:
+            state = step.state or {}
+            call = {
+                "id": step.call_id,
+                "type": "function",
+                "function": {
+                    "name": step.tool,
+                    "arguments": json.dumps(step.arguments, ensure_ascii=False),
+                },
+            }
+            if state.get("thought_signature"):
+                call["extra_content"] = {
+                    "google": {"thought_signature": state["thought_signature"]}
+                }
+            assistant = {"role": "assistant", "content": "", "tool_calls": [call]}
+            if state.get("reasoning_content"):
+                assistant["reasoning_content"] = state["reasoning_content"]
+            messages.append(assistant)
+            messages.append({"role": "tool", "tool_call_id": step.call_id, "content": step.output})
+        return messages
+
+    def decide(self, turn: Turn) -> Reply:
+        request: dict[str, Any] = {"messages": self.messages(turn)}
+        if turn.tools:
+            request["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    },
+                }
+                for tool in turn.tools
+            ]
+        response = self._create(**request)
+        message = response.choices[0].message
+        usage = getattr(response, "usage", None)
+        reply = Reply(text=message.content or "", total_tokens=getattr(usage, "total_tokens", None))
+        if message.tool_calls:
+            call = message.tool_calls[0]  # NLG runs one action per decision
+            reply.tool_call = ToolCall(call.function.name, parse_arguments(call.function.arguments))
+            state = {"call_id": call.id}
+            google = ((call.model_extra or {}).get("extra_content") or {}).get("google") or {}
+            if google.get("thought_signature"):
+                state["thought_signature"] = google["thought_signature"]
+            reasoning = (message.model_extra or {}).get("reasoning_content")
+            if reasoning:
+                state["reasoning_content"] = reasoning
+            reply.state = state
+        return reply
+
+    def complete_json(self, system: str, user: str, schema: dict) -> dict:
+        response = self._create(
+            messages=[
+                {"role": "system", "content": system + JSON_NOTE},
+                {"role": "user", "content": user},
+            ],
+            response_format={"type": "json_object"},
+        )
+        return parse_json_object(response.choices[0].message.content or "")

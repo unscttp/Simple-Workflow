@@ -11,8 +11,11 @@
 - [工作方式](#工作方式)
 - [快速开始](#快速开始)
 - [配置](#配置)
+- [模型服务](#模型服务)
 - [权限与审批](#权限与审批)
 - [工具](#工具)
+- [技能：综述生成](#技能综述生成)
+- [工作流图视图](#工作流图视图)
 - [长期知识](#长期知识)
 - [HTTP API](#http-api)
 - [数据与隐私](#数据与隐私)
@@ -27,16 +30,21 @@
 frontend (Next.js) ──HTTP──> backend (FastAPI)
                                └─ AgentService
                                    ├─ 每条消息对应一个 NLG 任务（"chat-turn" 工作流）
-                                   ├─ 模型适配器 ── DeepSeek / OpenAI 兼容 API
+                                   ├─ 模型适配器 ── DeepSeek / Claude / GPT / Gemini
                                    ├─ 工具：web、data、text、reports
+                                   ├─ 技能：survey-creator（Agent Skills 包）
+                                   ├─ 生成图：经审核的子工作流（graph.create）
                                    ├─ allowance：risk-low / risk-medium / risk-high
-                                   └─ 知识库（经审核，跨对话共享）
+                                   ├─ 知识库（经审核，跨对话共享）
+                                   └─ 运行中任务登记 ── 工作流图视图
 ```
 
 - 你发送的每条消息都会启动一个 `chat-turn` 工作流任务（`backend/config/workflow.json`）：
   只有一个 LLM 节点，它可以循环调用工具，最后给出回答。
-- 模型通过原生 tool calling 调用。适配器（`backend/app/model.py`）把框架的提示词转换为聊天消息和工具定义，
-  再把模型的回复转换为工具调用或最终回答。
+- 模型通过原生 tool calling 调用。适配器（`backend/app/model.py`）把框架的提示词转换为与服务商无关的一轮请求
+  （聊天消息、工具定义、本轮之前的工具调用及结果）；`backend/app/providers/` 中的各个服务商模块按各自 API 的格式发送，
+  再把回复转换为工具调用或最终回答。
+- 每条消息都可以选择服务商和模型，因此同一段对话可以换一个模型继续。
 - 当某个工具需要你批准时，本轮会暂停。界面会展示将要执行的操作；你允许后继续执行，拒绝则本轮结束。
 - 每一轮结束后，连同完整日志保存在 `SW_DATA_DIR` 下。
 
@@ -56,7 +64,7 @@ git clone --recurse-submodules https://github.com/unscttp/Simple-Workflow.git
 docker compose up --build
 ```
 
-打开 `http://localhost:3000`，填入 DeepSeek API Key 即可开始对话。端口通过 `FRONTEND_PORT`（默认 3000）
+打开 `http://localhost:3000`，选择模型服务并填入对应的 API Key 即可开始对话。端口通过 `FRONTEND_PORT`（默认 3000）
 和 `BACKEND_PORT`（默认 8000）设置。数据（包括报告目录）保存在 `sw-data` 数据卷中；在 Docker 里，
 报告目录必须位于 `/data/reports` 之内。
 
@@ -93,8 +101,9 @@ cd frontend && npm install && npm run dev
 | --- | --- | --- |
 | `SW_DATA_DIR` | `./data` | 会话、已保存的对话轮次和知识库 |
 | `SW_REPORTS_ROOT` | 未设置 | 设置后，只能批准该目录之内的报告目录 |
-| `SW_MODEL_BASE_URL` | `https://api.deepseek.com` | 任意 OpenAI 兼容的对话接口 |
-| `SW_DEFAULT_MODEL` | `deepseek-chat` | 请求未指定模型时使用的模型 |
+| `SW_DEFAULT_PROVIDER` | `deepseek` | 请求未指定服务商时使用的服务商：`deepseek`、`anthropic`、`openai` 或 `gemini` |
+| `SW_<PROVIDER>_MODEL` | 见[模型服务](#模型服务) | 请求未指定模型时使用的模型，例如 `SW_ANTHROPIC_MODEL` |
+| `SW_<PROVIDER>_BASE_URL` | 服务商官方 API | 该服务商 API 的其他地址，例如代理 |
 | `SW_DEFAULT_RISK_LEVEL` | `medium` | 新会话的风险级别 |
 | `SW_KNOWLEDGE_CONSOLIDATION` | `true` | 每轮结束后询问模型哪些内容值得记住（多一次模型调用） |
 | `SW_HISTORY_MESSAGES` | `20` | 每轮随请求发送的历史消息条数 |
@@ -102,6 +111,36 @@ cd frontend && npm install && npm run dev
 
 本应用使用的框架设置（提示词大小预算、知识审核、各种上限）位于 `backend/config/memory_settings.json`，
 各项含义见 NLG 的 README。
+
+## 模型服务
+
+| 服务商 | `provider` | API | 默认模型 |
+| --- | --- | --- | --- |
+| DeepSeek | `deepseek` | Chat Completions（`openai` SDK） | `deepseek-chat` |
+| Claude | `anthropic` | Messages（`anthropic` SDK） | `claude-opus-5-5` |
+| GPT | `openai` | Responses（`openai` SDK） | `gpt-5.5` |
+| Gemini | `gemini` | Google 的 OpenAI 兼容 Chat Completions 接口（`openai` SDK） | `gemini-3.8-flash` |
+
+界面在浏览器中为每个服务商分别保存一个 API Key 和一个模型。“读取可用模型”会向服务商查询该 Key 可用的模型
+（`POST /api/providers/{provider}/models`），也可以直接输入任意模型 ID。使用前请向服务商确认默认模型 ID，
+必要时用 `SW_<PROVIDER>_MODEL` 覆盖。
+
+同一轮内工具调用之后，各服务商如何继续：
+
+- **Claude**：每次工具调用时助手的完整内容（包括 thinking 块）原样发回，模型在多次工具调用之间保留推理过程。
+  thinking 使用模型的默认设置（当前模型为自适应）。在支持服务端拒绝回退的模型上（`claude-fable-5-2`、
+  `claude-fable-5-1`、`claude-opus-5-5`、`claude-opus-5`、`claude-sonnet-5-5`），请求会启用该功能
+  （`fallbacks: "default"`）：如果模型拒绝请求，API 可能在同一次调用中改由回退模型回答。仍被拒绝的请求会使本轮失败，
+  并给出拒绝类别。提示词前缀自动缓存；知识整理使用结构化输出。
+- **GPT**：请求不在服务端保存（`store: false`）；每一步的加密推理条目和函数调用会在下一次请求中发回。
+- **Gemini**：每个工具调用都带有 thought signature，本轮后续请求必须带上它；它随该步骤保存并发回。
+- **DeepSeek**：思考模型的 `reasoning_content` 会随同一轮的工具调用发回。
+
+这些状态随每一步保存在 NLG 日志中（框架 ReAct 历史的 `model_state`），从不以文本形式展示给模型。
+推理状态与生成它的模型以及之前的请求内容绑定，因此只有在本轮的模型、系统提示词和工具都没有变化、
+且提示词中没有省略步骤时才会回放。否则（例如在批准工具调用时换了模型）只发送普通的工具调用和结果。
+
+每个服务商每一步只被要求调用一个工具（NLG 每次决策执行一个动作）。
 
 ## 权限与审批
 
@@ -139,9 +178,51 @@ cd frontend && npm install && npm run dev
 | `reports.delete` | high | 每次调用 | 删除一份报告 |
 | `knowledge.list` / `read` / `search` | low | – | 读取经审核的知识 |
 | `knowledge.propose` | medium | 审核队列 | 提出知识变更（见下文） |
+| `skill.survey-creator.invoke` / `read` / `finish` | low | – | 打开综述技能、读取其中的文件、关闭技能 |
+| `skill.survey-creator.script` | high | 每次调用 | 运行技能中的 `scripts/check_survey.py` |
+| `graph.create` | high | 每个图 | 把经审核的工作流图作为子任务运行 |
 
 工具运行前会按其 JSON schema 校验参数；错误会返回给模型，以便它修正调用。文件名只能是不含目录的普通名称。
 新增工具请参考 `skills/adding-tools/SKILL.md`。
+
+## 技能：综述生成
+
+`backend/skills/survey-creator/` 是一个 [Agent Skills](https://agentskills.io/specification) 技能包，
+用于撰写学术综述（文献综述论文）：确定综述范围，用网络搜索收集并筛选文献，建立分类体系和对比表，
+最后把带引用的 Markdown 综述保存到已批准的目录。NLG 通过 `register_skill` 注册它，把它变成普通工具，
+和其他工具一样受会话风险级别约束。
+
+| 文件 | 内容 |
+| --- | --- |
+| `SKILL.md` | `invoke` 返回的说明：基本规则（绝不编造文献）、八个步骤、工作流图选项 |
+| `templates/outline.md` | 综述的章节规划 |
+| `references/structure.md` | 如何建立分类体系、对比表以及挑战与展望 |
+| `references/citations.md` | 数字引用格式、类 APA 与 GB/T 7714-2015 参考文献格式 |
+| `graphs/survey-pipeline.json` / `.md` | 流水线图及其使用场景，格式与 NLG 把图保存进技能时相同 |
+| `scripts/check_survey.py` | 检查已保存的综述：章节、引用编号、缺少链接的参考文献、文献新近程度 |
+
+在对话中提出要求即可，例如“写一篇关于检索增强生成的综述”。具体过程取决于风险级别：
+
+- **low / medium**：助手打开技能，读取需要的文件，自己完成各个步骤。保存报告需要 medium。
+- **high**：额外提供两个工具。`graph_create` 把技能中的四阶段流水线（确定范围 → 收集文献 → 组织结构 → 撰写）
+  作为生成图运行：运行前你会在审批卡片中看到各阶段及其权限，运行时工作流图视图会跟踪子任务。
+  研究阶段使用 `survey-research` allowance（只能搜索和读取技能），撰写阶段使用 `survey-writer`（另可保存和编辑报告）。
+  之后 `skill_survey-creator_script` 会对保存的文件运行检查脚本，同样需要你批准。
+
+这里用到的 NLG 功能：技能调用、限定在技能包内的文件读取与路径检查、子任务中的技能调用、按哈希固定并需人工批准的脚本、
+带 allowance 子集检查和审核的生成图、子任务审批转交给父任务，以及日志和审计记录中的技能活动。
+
+要添加其他技能，把技能包放到 `backend/skills/<名称>/`，在 `backend/app/tools/__init__.py` 的 `SKILLS` 中登记它及可运行的脚本，
+并把对应的 `tool:skill.<名称>.*` 动作加入三个风险 allowance。
+
+## 工作流图视图
+
+**Workflow Graph** 面板显示当前一轮运行所在的工作流图以及进行到哪一步。每个节点显示状态（未开始、运行中、等待、完成、失败），
+运行或等待时还会显示正在做什么：等待模型决策、调用工具、运行生成的子图或等待你确认。已完成的节点显示模型决策次数和工具调用次数。
+生成图显示在创建它的节点下方，附带说明、来源技能以及自己的节点状态。
+
+请求进行期间，界面每秒轮询一次 `GET /api/sessions/{id}/graph`。后端在每个引擎上注册了 NLG 运行观察者，
+因此能在任务保存之前看到本轮任务以及生成图子任务的实时状态。没有正在运行的一轮时，视图显示等待审批的一轮，否则显示最近一轮。
 
 ## 长期知识
 
@@ -155,23 +236,27 @@ cd frontend && npm install && npm run dev
 | 方法和路径 | 用途 |
 | --- | --- |
 | `GET /health` | 健康检查 |
+| `GET /api/providers` | 服务商、各自的默认模型以及默认服务商 |
+| `POST /api/providers/{provider}/models` | 该 Key 可用的模型 ID `{api_key}` |
 | `POST /api/sessions` | 创建会话 |
 | `GET /api/sessions/{id}` | 会话：风险级别、目录、消息、待审批请求 |
+| `GET /api/sessions/{id}/graph` | 正在运行、等待审批或最近一轮的工作流图（`?task_id=` 指定本会话的其他轮次） |
 | `PUT /api/sessions/{id}/risk-level` | 设置风险级别 `{risk_level}` |
 | `DELETE /api/sessions/{id}/workspace` | 撤销报告目录 |
-| `POST /api/sessions/{id}/messages` | 运行一轮 `{api_key, message, model?}` |
-| `POST /api/sessions/{id}/approvals/{request_id}` | 作出决定 `{api_key, approved, comment?, model?}` 并继续本轮 |
+| `POST /api/sessions/{id}/messages` | 运行一轮 `{api_key, message, provider?, model?}` |
+| `POST /api/sessions/{id}/approvals/{request_id}` | 作出决定 `{api_key, approved, comment?, provider?, model?}` 并继续本轮 |
 | `GET /api/knowledge` | 知识页面和待审核提案 |
 | `GET /api/knowledge/pages/{scope}/{slug}` | 读取一个页面 |
 | `POST /api/knowledge/proposals/{id}` | 采纳或拒绝 `{approved, comment?}` |
 | `POST /api/knowledge/changes/{id}/revert` | 撤销一次已生效的变更 |
 
 每轮返回 `status`（`completed`、`waiting` 或 `failed`）、`answer`、`tool_logs`、`audit_entries`、
-`pending_approvals` 以及更新后的 `session`。某轮等待决定期间，新消息会以 HTTP 409 拒绝。
+`pending_approvals`、`stats`（使用的模型、模型决策次数、token 数和工具调用次数）以及更新后的 `session`。
+助手消息会记录生成它的 `provider/model`。某轮等待决定期间，新消息会以 HTTP 409 拒绝。
 
 ## 数据与隐私
 
-- API Key 保存在浏览器本地存储中，随每次请求发送。后端只在该请求中使用它，不会写入会话、日志或记录，
+- API Key 保存在浏览器本地存储中，随每次请求发送，只发给后端，且只发送所选服务商的 Key。后端只在该请求中使用它，不会写入会话、日志或记录，
   模型错误信息也不会包含它。
 - `SW_DATA_DIR` 保存会话（消息、风险级别、已批准目录）、每轮的日志（工具参数和结果）以及知识库。
 - 没有登录功能。任何能访问 API 的人都能使用和审核所有会话；请在本地运行，或部署在你自己的认证之后。
@@ -190,15 +275,18 @@ ruff check . && ruff format --check .
 cd frontend && npx tsc --noEmit && npm run build
 ```
 
-后端测试可以离线运行：由脚本化的模型代替 DeepSeek，由桩函数代替网络搜索。
+后端测试可以离线运行：由脚本化的模型代替各服务商，由桩函数代替网络搜索；各服务商的请求格式通过返回 SDK 自带响应类型的假客户端测试。
 
 | 路径 | 内容 |
 | --- | --- |
 | `backend/app/main.py` | FastAPI 路由 |
 | `backend/app/agent.py` | 以 NLG 任务运行对话轮次：引擎配置、执行、审批 |
-| `backend/app/model.py` | 模型客户端以及 NLG 调用的适配器 |
+| `backend/app/model.py` | NLG 调用的适配器，与服务商无关 |
+| `backend/app/providers/` | 每种模型 API 一个模块：Chat Completions、Responses、Messages |
 | `backend/app/tools/` | 工具定义和处理函数 |
 | `backend/app/journal.py` | 从每轮日志生成工具记录、审计记录和审批请求 |
+| `backend/app/graph_view.py`、`backend/app/live.py` | 工作流图视图和运行中任务的登记 |
+| `backend/skills/` | 助手可以使用的 Agent Skills（survey-creator） |
 | `backend/app/sessions.py` | 会话和对话轮次的存储 |
 | `backend/config/` | 工作流、allowance 和框架设置 |
 | `backend/prompts/system_prompt.md` | 助手的指令（中文） |
@@ -217,14 +305,32 @@ git -C third_party/nlg fetch origin && git -C third_party/nlg checkout <commit>
 
 然后运行后端测试，并提交新的子模块提交。这里用到的框架功能有：带 ReAct 的 LLM 节点、allowance 与风险上限、
 按 schema 校验的工具、可暂停并在保存后恢复任务的人工审批、任务日志、任务持久化、受限大小的提示词，
-以及带审核的长期知识。
+带审核的长期知识、Agent Skills、生成图以及运行观察者。
 
 迁移过程中发现并已在框架中修复的问题：
 
 - 工具参数没有按 `input_schema` 校验；
 - LLM 节点无法在没有主动记忆写入器的情况下运行（每次工具调用都多一次模型调用）；
 - 框架无法通过 `pip install -e` 安装；
-- 知识整理看不到待审核的提案，导致相邻两轮重复提出同一个页面。
+- 知识整理看不到待审核的提案，导致相邻两轮重复提出同一个页面；
+- ReAct 动作无法把服务商状态（Gemini 的 thought signature、Claude 的 thinking 块、GPT 的推理条目）带到下一次决策，
+  导致 Gemini 在第二次工具调用时失败，其他模型在工具调用之间丢失推理过程。现在动作带有不透明的 `model_state`；
+- 在 `graph.create` 调用返回之前，宿主看不到生成图的子任务，因此既无法显示其进度，也无法判断子任务属于哪个会话。
+  现在 `engine.add_run_observer` 会报告每个节点 execution，包括子任务中的。
+
+在本应用中发现并处理、未改动框架的问题：
+
+- 生成图的子任务只带有父任务的 id，不带宿主的元数据（这里是会话 id）。报告工具通过运行中任务的登记查找子任务所属的会话，
+  而不信任任务数据，因为生成图可以写入任务数据。
+- ReAct 历史会把每个字符串截断到 `prompt_max_value_chars`，技能说明、用 `skill.<名称>.read` 读取的文件（以及从技能复制的图）
+  也会被截断。`backend/config/memory_settings.json` 把它提高到 16000，并把 `prompt_budget_chars` 提高到 48000，
+  使完整的技能文件能到达模型。如果框架支持按工具设置上限，就不必让每个提示词都变大。
+
+### 比较不同模型
+
+每轮都会报告由哪些模型运行、用了多少次决策和工具调用、消耗了多少 token；界面在输入框下方显示这些信息，
+每个保存的轮次也会把它们记录在 `task.metadata["models"]` 和日志中。要比较模型，可以在新会话中用不同服务商发送同一个任务，
+或者在对话中途切换服务商，观察另一个模型如何在相同的历史上继续。
 
 ## 与上一版本的差异
 
@@ -243,4 +349,6 @@ git -C third_party/nlg fetch origin && git -C third_party/nlg checkout <commit>
 - 只支持一个后端进程：同一会话的轮次在进程内串行执行，不跨进程协调。
 - 助手每一步只调用一个工具。
 - 网络搜索依赖 DuckDuckGo，可能被限流。
-- 使用脚本化模型离线测试；接入真实模型后的表现取决于模型是否遵循 `system_prompt.md` 中的指令。
+- `graph.create` 工具的 schema 使用了 `$ref` 和 `anyOf`。Claude 和 GPT 可以接受；Gemini 的 OpenAI 兼容接口是否接受尚未测试。
+- 工作流图视图在请求进行期间轮询；有多个后端进程时，只能看到由应答进程运行的轮次。
+- 使用脚本化模型和假的服务商客户端离线测试；接入真实模型后的表现取决于模型是否遵循 `system_prompt.md` 中的指令。
