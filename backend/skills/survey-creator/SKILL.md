@@ -63,20 +63,22 @@ citation, not on length.
 
 ## Running the steps as a workflow graph
 
-If the tool `graph_create` is available (the session's risk level is high), you
-can run steps 3-6 as a reviewed workflow graph instead of doing them yourself.
-Finish steps 1-2 first: the graph's nodes read the scope from the conversation
-and save into the approved folder.
+If the tool `skill_survey-creator_run_graph` is available (the session's risk
+level is high), you can run steps 3-6 as a reviewed workflow graph instead of
+doing them yourself. Finish steps 1-2 first: the graph's nodes read the scope
+from the conversation and save into the approved folder.
 
 **Reuse a graph that worked before.** Opening this skill returned `graphs`: the
 graphs saved in it, newest first, each with an `id`, a `title`, its
 `usage_scenario` (when to use it) and its stages. `survey-pipeline` is the
 standard four-stage pipeline (scope, collect, organise, write). Pick the graph
-whose usage scenario best fits the request and call `graph_create` with only
-`skill_graph` set to its `id` (and `skill_invoke_id`). Ignore entries marked
-`invalid`. The user reviews the graph before it runs.
+whose usage scenario best fits the request and call
+`skill_survey-creator_run_graph` with this skill's `invoke_id` and the graph's
+`id` as `graph_id`. Ignore entries marked `invalid`. The user reviews the graph
+before it runs.
 
-**Adapt it when the request needs something different**, for example a stage
+**Adapt it when the request needs something different** and `graph_create` is
+available, for example a stage
 that searches Chinese databases, a narrower collect stage, or a different
 writing format. Read the closest graph with `skill_survey-creator_read`
 (`graphs/<id>.json`), change what the request needs, and call `graph_create`

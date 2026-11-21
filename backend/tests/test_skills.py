@@ -111,10 +111,12 @@ class SkillToolTests(ApiCase):
             self.assertIn(f"skill_survey-creator_{op}", names)
         self.assertNotIn("skill_survey-creator_script", names)  # high risk
         self.assertNotIn("graph_create", names)  # high risk
+        self.assertNotIn("skill_survey-creator_run_graph", names)  # high risk
         self.set_risk("high")
         self.send("你好", answer("你好"))
         self.assertIn("skill_survey-creator_script", self.model.tool_names())
         self.assertIn("graph_create", self.model.tool_names())
+        self.assertIn("skill_survey-creator_run_graph", self.model.tool_names())
 
     def test_invoke_read_and_finish(self):
         turn = self.send(
@@ -235,7 +237,9 @@ class SurveyPipelineTests(ApiCase):
         turn = self.send(
             "写一篇关于检索增强生成的综述",
             call("skill_survey-creator_invoke"),
-            call("graph_create", skill_graph="survey-pipeline"),
+            lambda t: call(
+                "skill_survey-creator_run_graph", invoke_id=invoke_id(t), graph_id="survey-pipeline"
+            ),
         )
         (approval,) = turn["pending_approvals"]
         self.assertEqual(approval["kind"], "graph_creation")
@@ -331,7 +335,9 @@ class SurveyPipelineTests(ApiCase):
         turn = self.send(
             "综述",
             call("skill_survey-creator_invoke"),
-            call("graph_create", skill_graph="survey-pipeline"),
+            lambda t: call(
+                "skill_survey-creator_run_graph", invoke_id=invoke_id(t), graph_id="survey-pipeline"
+            ),
         )
         turn = self.decide(turn["pending_approvals"][0]["id"], False)
         self.assertEqual(turn["status"], "failed")
@@ -376,7 +382,9 @@ class SurveyPipelineTests(ApiCase):
         turn = self.send(
             "再写一篇",
             call("skill_survey-creator_invoke"),
-            call("graph_create", skill_graph=saved.stem),
+            lambda t: call(
+                "skill_survey-creator_run_graph", invoke_id=invoke_id(t), graph_id=saved.stem
+            ),
         )
         (approval,) = turn["pending_approvals"]
         self.assertEqual(

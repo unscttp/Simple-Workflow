@@ -20,6 +20,7 @@
     "tool:skill.survey-creator.read",
     "tool:skill.survey-creator.finish",
     "tool:skill.survey-creator.script",
+    "tool:skill.survey-creator.run_graph",
     "tool:graph.create"
   ],
   "max_tool_risk": "high",

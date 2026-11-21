@@ -9,7 +9,8 @@ call runs, and from the parent execution's saved graph records afterwards.
 Node status: ``pending`` (not reached), ``ready``, ``running``, ``waiting``
 (for the user), ``completed``, ``failed`` or ``skipped``. ``activity`` says
 what a running or waiting node is doing: ``model`` (waiting for the model),
-``tool`` (a tool call; ``graph`` for ``graph.create``) or ``approval``.
+``tool`` (a tool call; ``graph`` for ``graph.create`` and ``skill.<name>.run_graph``)
+or ``approval``.
 """
 
 from __future__ import annotations
@@ -34,7 +35,10 @@ def _activity(task: Task, execution_id: str) -> dict | None:
             activity = {"kind": "model"}
         elif kind == "tool.requested":
             name = str(details.get("action", "")).removeprefix("tool:")
-            activity = {"kind": "graph" if name == "graph.create" else "tool", "tool": name}
+            runs_graph = name == "graph.create" or (
+                name.startswith("skill.") and name.endswith(".run_graph")
+            )
+            activity = {"kind": "graph" if runs_graph else "tool", "tool": name}
         elif kind == "tool.waiting" and activity is not None:
             activity = {**activity, "kind": "approval"}
         elif kind in {"llm.completed", "llm.failed", "tool.completed", "tool.failed"}:
