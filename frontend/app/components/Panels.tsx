@@ -104,6 +104,16 @@ export function WorkspacePanel({
   );
 }
 
+/** Short name of what an approval request would allow. */
+export function approvalLabel(approval: Approval): string {
+  return (
+    KIND_LABELS[approval.kind] ||
+    (approval.tool_name && TOOL_LABELS[approval.tool_name]) ||
+    approval.tool_name ||
+    approval.kind
+  );
+}
+
 export function ApprovalCard({
   approval,
   disabled,
@@ -114,11 +124,7 @@ export function ApprovalCard({
   onDecide: (approved: boolean, comment: string) => void;
 }) {
   const [comment, setComment] = useState("");
-  const label =
-    KIND_LABELS[approval.kind] ||
-    (approval.tool_name && TOOL_LABELS[approval.tool_name]) ||
-    approval.tool_name ||
-    approval.kind;
+  const label = approvalLabel(approval);
   return (
     <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm text-amber-900">
       <p className="font-semibold">需要你的确认：{label}</p>
@@ -216,14 +222,18 @@ const STATUS_STYLES: Record<ToolLog["status"], [string, string]> = {
   requested: ["已请求", "bg-slate-200 text-slate-700"],
 };
 
-export function ToolLogs({ logs }: { logs: ToolLog[] }) {
+/** ``decided``: the user has just decided on the waiting call; the turn is continuing. */
+export function ToolLogs({ logs, decided = false }: { logs: ToolLog[]; decided?: boolean }) {
   return (
     <Card title="Tool Logs" extra={`${logs.length} 条`}>
       {logs.length === 0 ? (
         <p className="text-sm text-slate-500">本轮还没有工具调用。</p>
       ) : (
         logs.map((log) => {
-          const [label, style] = STATUS_STYLES[log.status];
+          const submitted = decided && log.status === "waiting";
+          const [label, style] = submitted
+            ? ["已提交决定", "bg-sky-100 text-sky-700"]
+            : STATUS_STYLES[log.status];
           return (
             <div key={log.id} className="rounded-2xl bg-white p-4 shadow-sm">
               <div className="flex items-center justify-between gap-2">
@@ -233,7 +243,9 @@ export function ToolLogs({ logs }: { logs: ToolLog[] }) {
               <pre className="mt-3 whitespace-pre-wrap rounded-xl bg-slate-950 p-3 text-xs text-slate-100">
                 {JSON.stringify(log.arguments, null, 2)}
               </pre>
-              <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap text-sm text-slate-700">{log.output}</pre>
+              <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap text-sm text-slate-700">
+                {submitted ? "已提交你的决定，等待本轮继续执行。" : log.output}
+              </pre>
             </div>
           );
         })

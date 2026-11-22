@@ -21,6 +21,7 @@ import { GraphPanel } from "./components/GraphPanel";
 import { ModelSettings, TurnStatsLine, useModelChoice } from "./components/ModelSettings";
 import {
   ApprovalCard,
+  approvalLabel,
   AuditTrail,
   KnowledgePanel,
   RiskSelector,
@@ -49,6 +50,9 @@ export default function HomePage() {
   const [knowledge, setKnowledge] = useState<Knowledge>({ pages: [], proposals: [] });
   const [openPage, setOpenPage] = useState<{ page: string; content: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // The decision being sent: its card disappears at once, and a note stands in for it
+  // while the turn continues (that can take minutes); it comes back if the request fails.
+  const [decision, setDecision] = useState<{ id: string; text: string } | null>(null);
   const [error, setError] = useState("");
 
   const refreshGraph = useCallback(async (sessionId: string) => {
@@ -148,12 +152,22 @@ export default function HomePage() {
 
   async function handleDecision(requestId: string, approved: boolean, comment: string) {
     const choice = session ? requireChoice() : null;
-    if (!session || !choice) {
+    const approval = session?.pending_approvals.find((item) => item.id === requestId);
+    if (!session || !choice || !approval) {
       return;
     }
-    await run(async () =>
-      applyTurn(await api.decide(session.id, requestId, choice, approved, comment)),
-    );
+    const label = approvalLabel(approval);
+    setDecision({
+      id: requestId,
+      text: approved ? `你已允许：${label}。Agent 正在继续执行……` : `你已拒绝：${label}。`,
+    });
+    try {
+      await run(async () =>
+        applyTurn(await api.decide(session.id, requestId, choice, approved, comment)),
+      );
+    } finally {
+      setDecision(null);
+    }
   }
 
   async function handleRiskLevel(level: RiskLevel) {
@@ -186,7 +200,7 @@ export default function HomePage() {
     });
   }
 
-  const pending = session?.pending_approvals ?? [];
+  const pending = (session?.pending_approvals ?? []).filter((item) => item.id !== decision?.id);
   const messages = session?.messages ?? [];
 
   return (
@@ -233,6 +247,11 @@ export default function HomePage() {
                   <pre className="whitespace-pre-wrap font-sans">{message.content}</pre>
                 </div>
               ))}
+              {decision && (
+                <div className="ml-auto max-w-[85%] rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-sm">
+                  {decision.text}
+                </div>
+              )}
               {busy && (
                 <div className="max-w-[85%] rounded-2xl bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
                   Agent 正在思考并可能调用工具，请稍候...
@@ -279,7 +298,7 @@ export default function HomePage() {
             )}
 
             <GraphPanel graph={graph} />
-            <ToolLogs logs={toolLogs} />
+            <ToolLogs logs={toolLogs} decided={decision !== null} />
             <AuditTrail entries={auditEntries} />
             <KnowledgePanel
               knowledge={knowledge}
