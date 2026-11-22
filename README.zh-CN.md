@@ -109,6 +109,8 @@ cd frontend && npm install && npm run dev
 | `SW_KNOWLEDGE_CONSOLIDATION` | `true` | 每轮结束后询问模型哪些内容值得记住（多一次模型调用） |
 | `SW_HISTORY_MESSAGES` | `20` | 每轮随请求发送的历史消息条数 |
 | `SW_CORS_ORIGINS` | `http://localhost:3000` | 允许调用 API 的来源，逗号分隔 |
+| `SW_MODEL_RETRIES` | `3` | 模型请求超时、连接中断或服务繁忙时的自动重试次数（0 表示关闭；见[模型服务](#模型服务)） |
+| `SW_MODEL_TIMEOUT_SECONDS` | `300` | 等待模型回答的最长时间（建立连接的超时为 15 秒） |
 | `SW_SEARCH_PROVIDER` | `auto` | 网络搜索后端：`tavily`、`brave`、`searxng`、`duckduckgo` 或 `auto`（见[工具](#工具)） |
 | `SW_TAVILY_API_KEY` / `SW_BRAVE_API_KEY` | 未设置 | Tavily 或 Brave Search API 的密钥 |
 | `SW_SEARXNG_URL` | 未设置 | 启用了 JSON 格式的 SearXNG 实例地址 |
@@ -150,6 +152,11 @@ cd frontend && npm install && npm run dev
 且提示词中没有省略步骤时才会回放。否则（例如在批准工具调用时换了模型）只发送普通的工具调用和结果。
 
 每个服务商每一步只被要求调用一个工具（NLG 每次决策执行一个动作）。
+
+**自动重连。** 超时、连接中断以及 HTTP 408、409、425、429、5xx 和 529 都会被标记为暂时性错误，由 NLG 重试（`model_retry_attempts`）：
+最多 `SW_MODEL_RETRIES` 次，依次等待 2、4、8……秒（最长 30 秒）。界面中的“自动重连”选项可以按请求开关（请求体中的 `auto_retry`）；
+除非 `SW_MODEL_RETRIES` 为 0，否则默认开启。SDK 自身的隐式重试已关闭，因此每次重试都会记入本轮日志，并计入本轮统计。
+其他错误（密钥无效、请求被拒绝等）会立即报告。等待回答的超时为 `SW_MODEL_TIMEOUT_SECONDS`（300 秒），足够写完一整份报告。
 
 ## 权限与审批
 
@@ -283,7 +290,7 @@ NLG 还会在不经过模型的情况下，把每个保存的图的运行环境�
 | `GET /api/sessions/{id}/graph` | 正在运行、等待审批或最近一轮的工作流图（`?task_id=` 指定本会话的其他轮次） |
 | `PUT /api/sessions/{id}/risk-level` | 设置风险级别 `{risk_level}` |
 | `DELETE /api/sessions/{id}/workspace` | 撤销报告目录 |
-| `POST /api/sessions/{id}/messages` | 运行一轮 `{api_key, message, provider?, model?}` |
+| `POST /api/sessions/{id}/messages` | 运行一轮 `{api_key, message, provider?, model?, auto_retry?}` |
 | `POST /api/sessions/{id}/approvals/{request_id}` | 作出决定 `{api_key, approved, comment?, provider?, model?}` 并继续本轮 |
 | `GET /api/knowledge` | 知识页面和待审核提案 |
 | `GET /api/knowledge/pages/{scope}/{slug}` | 读取一个页面 |

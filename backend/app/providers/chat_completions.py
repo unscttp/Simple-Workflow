@@ -20,7 +20,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .base import Reply, ToolCall, Turn, parse_arguments, parse_json_object, provider_message
+from .base import (
+    Reply,
+    ToolCall,
+    Turn,
+    parse_arguments,
+    parse_json_object,
+    provider_message,
+    request_failed,
+)
 from .gemini_schema import gemini_parameters
 
 JSON_NOTE = "\n\nRespond with a single JSON object and nothing else."
@@ -36,9 +44,11 @@ def wrap_openai_errors(call, secrets=(), what: str = "Model request"):
     try:
         return call()
     except openai.APIStatusError as exc:
-        reason = provider_message(exc.body, secrets)
-        detail = f": {reason}" if reason else "."
-        raise ModelError(f"{what} failed with HTTP {exc.status_code}{detail}") from None
+        raise request_failed(exc.status_code, provider_message(exc.body, secrets), what) from None
+    except openai.APITimeoutError:
+        raise request_failed(None, "the request timed out", what) from None
+    except openai.APIConnectionError:
+        raise request_failed(None, "could not connect", what) from None
     except openai.APIError as exc:
         raise ModelError(f"{what} failed: {type(exc).__name__}.") from None
 

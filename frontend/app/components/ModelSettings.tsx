@@ -9,6 +9,7 @@ const PROVIDER_KEY = "model_provider";
 const keyName = (provider: ProviderId) => `api_key:${provider}`;
 const modelName = (provider: ProviderId) => `model:${provider}`;
 const LEGACY_DEEPSEEK_KEY = "deepseek_api_key";
+const AUTO_RETRY_KEY = "auto_retry";
 
 function stored(name: string): string {
   try {
@@ -31,8 +32,13 @@ function store(name: string, value: string) {
 }
 
 /** The provider, key and model the next request uses; `null` until a key is entered. */
-export function useModelChoice(providers: Provider[], defaultProvider: ProviderId | null) {
+export function useModelChoice(
+  providers: Provider[],
+  defaultProvider: ProviderId | null,
+  autoRetryDefault = true,
+) {
   const [provider, setProvider] = useState<ProviderId | null>(null);
+  const [autoRetry, setAutoRetry] = useState(autoRetryDefault);
   const [keys, setKeys] = useState<Partial<Record<ProviderId, string>>>({});
   const [models, setModels] = useState<Partial<Record<ProviderId, string>>>({});
 
@@ -49,7 +55,9 @@ export function useModelChoice(providers: Provider[], defaultProvider: ProviderI
     setModels(Object.fromEntries(providers.map((p) => [p.id, stored(modelName(p.id))])));
     const saved = stored(PROVIDER_KEY) as ProviderId;
     setProvider(providers.some((p) => p.id === saved) ? saved : (defaultProvider ?? providers[0].id));
-  }, [providers, defaultProvider]);
+    const retry = stored(AUTO_RETRY_KEY);
+    setAutoRetry(retry ? retry === "on" : autoRetryDefault);
+  }, [providers, defaultProvider, autoRetryDefault]);
 
   const update = {
     provider: (id: ProviderId) => {
@@ -64,22 +72,30 @@ export function useModelChoice(providers: Provider[], defaultProvider: ProviderI
       setModels((current) => ({ ...current, [id]: value }));
       store(modelName(id), value.trim());
     },
+    autoRetry: (on: boolean) => {
+      setAutoRetry(on);
+      store(AUTO_RETRY_KEY, on ? "on" : "off");
+    },
   };
 
   const key = provider ? (keys[provider] ?? "").trim() : "";
   const model = provider ? (models[provider] ?? "").trim() : "";
   const choice: ModelChoice | null =
-    provider && key ? { provider, api_key: key, ...(model ? { model } : {}) } : null;
-  return { provider, keys, models, update, choice };
+    provider && key
+      ? { provider, api_key: key, auto_retry: autoRetry, ...(model ? { model } : {}) }
+      : null;
+  return { provider, keys, models, autoRetry, update, choice };
 }
 
 export function ModelSettings({
   providers,
   state,
+  retryAttempts,
   disabled,
 }: {
   providers: Provider[];
   state: ReturnType<typeof useModelChoice>;
+  retryAttempts?: number;
   disabled: boolean;
 }) {
   const { provider, keys, models, update } = state;
@@ -177,6 +193,22 @@ export function ModelSettings({
         )}
         {listError && <p className="mt-1 text-xs text-red-600">{listError}</p>}
       </div>
+
+      <label className="flex items-start gap-2 text-sm text-slate-700">
+        <input
+          type="checkbox"
+          checked={state.autoRetry}
+          onChange={(event) => update.autoRetry(event.target.checked)}
+          disabled={disabled}
+          className="mt-1 h-4 w-4 accent-amber-500"
+        />
+        <span>
+          自动重连
+          <span className="block text-xs text-slate-500">
+            模型请求超时、连接中断或服务繁忙时自动重试{retryAttempts ? `（最多 ${retryAttempts} 次）` : ""}。
+          </span>
+        </span>
+      </label>
     </div>
   );
 }
@@ -191,6 +223,7 @@ export function TurnStatsLine({ stats }: { stats: TurnStats | null }) {
       上一轮：<span className="font-mono">{models || "—"}</span> · {stats.decisions} 次决策 ·{" "}
       {stats.tool_calls} 次工具调用 · {stats.tokens_estimated ? "约 " : ""}
       {stats.tokens.toLocaleString()} tokens
+      {stats.retries > 0 && <> · 自动重连 {stats.retries} 次</>}
     </p>
   );
 }

@@ -41,7 +41,11 @@ function errorMessage(error: unknown): string {
 export default function HomePage() {
   const [session, setSession] = useState<Session | null>(null);
   const [providers, setProviders] = useState<Providers | null>(null);
-  const modelChoice = useModelChoice(providers?.providers ?? [], providers?.default ?? null);
+  const modelChoice = useModelChoice(
+    providers?.providers ?? [],
+    providers?.default ?? null,
+    providers?.auto_retry.default ?? true,
+  );
   const [stats, setStats] = useState<TurnStats | null>(null);
   const [graph, setGraph] = useState<TaskGraph | null>(null);
   const [input, setInput] = useState("");
@@ -213,7 +217,12 @@ export default function HomePage() {
             每个服务的 API Key 只保存在浏览器本地，每次请求时发给后端调用模型，后端不会保存。可以随时切换服务，比较不同模型的表现。
           </p>
 
-          <ModelSettings providers={providers?.providers ?? []} state={modelChoice} disabled={busy} />
+          <ModelSettings
+            providers={providers?.providers ?? []}
+            state={modelChoice}
+            retryAttempts={providers?.auto_retry.attempts}
+            disabled={busy}
+          />
 
           <RiskSelector session={session} disabled={busy || pending.length > 0} onChange={handleRiskLevel} />
           <WorkspacePanel session={session} disabled={busy} onRevoke={handleRevoke} />

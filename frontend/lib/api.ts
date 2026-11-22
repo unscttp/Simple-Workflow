@@ -14,10 +14,19 @@ export type Provider = {
   key_hint: string;
 };
 
-export type Providers = { default: ProviderId; providers: Provider[] };
+export type Providers = {
+  default: ProviderId;
+  providers: Provider[];
+  auto_retry: { default: boolean; attempts: number };
+};
 
 // The model a request runs on. The key is sent with each request and never stored by the backend.
-export type ModelChoice = { provider: ProviderId; api_key: string; model?: string };
+export type ModelChoice = {
+  provider: ProviderId;
+  api_key: string;
+  model?: string;
+  auto_retry?: boolean; // retry requests that time out or fail to connect
+};
 
 export type TurnStats = {
   models: { provider: string; model: string }[];
@@ -25,6 +34,7 @@ export type TurnStats = {
   tokens: number;
   tokens_estimated: boolean;
   tool_calls: number;
+  retries: number;
 };
 
 export type ChatMessage = {

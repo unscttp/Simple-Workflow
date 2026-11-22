@@ -11,5 +11,7 @@
   "graph_max_depth": 1,
   "graph_creation_human_check": true,
   "graph_save_human_check": true,
-  "graph_max_steps": 100
+  "graph_max_steps": 100,
+  "model_retry_delay_seconds": 2,
+  "model_retry_max_delay_seconds": 30
 }

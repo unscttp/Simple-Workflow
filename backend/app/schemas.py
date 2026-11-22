@@ -23,6 +23,11 @@ class ModelCredentials(ApiKey):
     model: str | None = Field(
         default=None, description="Model ID; defaults to the provider's default model."
     )
+    auto_retry: bool | None = Field(
+        default=None,
+        description="Retry model requests that time out or fail to connect; "
+        "defaults to on unless SW_MODEL_RETRIES is 0.",
+    )
 
 
 class MessageRequest(ModelCredentials):
@@ -83,9 +88,15 @@ class ProviderView(BaseModel):
     key_hint: str
 
 
+class AutoRetryView(BaseModel):
+    default: bool
+    attempts: int
+
+
 class ProvidersView(BaseModel):
     default: ProviderId
     providers: list[ProviderView]
+    auto_retry: AutoRetryView
 
 
 class ModelList(BaseModel):

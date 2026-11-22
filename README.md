@@ -120,6 +120,8 @@ Backend settings are environment variables:
 | `SW_KNOWLEDGE_CONSOLIDATION` | `true` | After each turn, ask the model what is worth remembering (one extra model call) |
 | `SW_HISTORY_MESSAGES` | `20` | Earlier chat messages sent with each turn |
 | `SW_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated origins allowed to call the API |
+| `SW_MODEL_RETRIES` | `3` | Automatic retries of a model request that timed out, lost its connection or found the provider busy (0 = off; see [Model providers](#model-providers)) |
+| `SW_MODEL_TIMEOUT_SECONDS` | `300` | How long to wait for a model's answer (connecting times out after 15 s) |
 | `SW_SEARCH_PROVIDER` | `auto` | Web search backend: `tavily`, `brave`, `searxng`, `duckduckgo`, or `auto` (see [Tools](#tools)) |
 | `SW_TAVILY_API_KEY` / `SW_BRAVE_API_KEY` | unset | Key of the Tavily or Brave Search API |
 | `SW_SEARXNG_URL` | unset | Base URL of a SearXNG instance with the JSON format enabled |
@@ -179,6 +181,16 @@ sent instead.
 
 Every provider is asked for one tool call per step (NLG runs one action per
 decision).
+
+**Automatic reconnect.** Timeouts, dropped connections and HTTP 408, 409, 425,
+429, 5xx and 529 are reported as transient, and NLG retries them
+(`model_retry_attempts`): up to `SW_MODEL_RETRIES` times, waiting 2, 4, 8 ...
+seconds (at most 30). The 自动重连 option in the interface switches this on or
+off per request (`auto_retry` in the request body); it starts as on unless
+`SW_MODEL_RETRIES` is 0. The SDKs' own hidden retries are off, so every retry is
+in the turn's journal and the turn's stats count them. Other errors (an invalid
+key, a refused request) are reported at once. Waiting for an answer times out
+after `SW_MODEL_TIMEOUT_SECONDS` (300), long enough for a whole report.
 
 ## Permissions and approvals
 
@@ -363,7 +375,7 @@ model can read from, and any change can be reverted through the API.
 | `GET /api/sessions/{id}/graph` | Workflow graph of the running, waiting or latest turn (`?task_id=` for another turn of the session) |
 | `PUT /api/sessions/{id}/risk-level` | Set the risk level `{risk_level}` |
 | `DELETE /api/sessions/{id}/workspace` | Revoke the report folder |
-| `POST /api/sessions/{id}/messages` | Run a turn `{api_key, message, provider?, model?}` |
+| `POST /api/sessions/{id}/messages` | Run a turn `{api_key, message, provider?, model?, auto_retry?}` |
 | `POST /api/sessions/{id}/approvals/{request_id}` | Decide `{api_key, approved, comment?, provider?, model?}` and continue the turn |
 | `GET /api/knowledge` | Knowledge pages and pending proposals |
 | `GET /api/knowledge/pages/{scope}/{slug}` | Read one page |
