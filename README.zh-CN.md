@@ -214,7 +214,8 @@ cd frontend && npm install && npm run dev
 
 **学术搜索。** `scholar.search` 查询开放的论文索引 OpenAlex。支持年份范围，可以按相关度、引用数或时间排序，
 使用英文关键词效果最好。综述技能用它收集文献。没有设置 `SW_OPENALEX_API_KEY` 时，它使用服务器所在 IP 上所有用户共享的每日免费额度，
-一次综述就可能用完；实际使用请向 OpenAlex 申请免费密钥。请求之间至少间隔 0.2 秒；遇到短时限流会等待并重试一次；
+一次综述就可能用完；实际使用请向 OpenAlex 申请免费密钥。也可以在设置面板中填写 OpenAlex API Key：
+和模型密钥一样，它只保存在浏览器中，随每次请求发送（`openalex_api_key`），在该请求中替代服务器的密钥，生成图的各阶段也会使用它，后端不会保存。请求之间至少间隔 0.2 秒；遇到短时限流会等待并重试一次；
 每日额度用完后，该工具会在一小时内不再请求 OpenAlex，并用一条清楚的消息告诉模型不要重试、需要配置什么。
 免密钥的网络搜索在“没有结果”时返回空列表（附说明），被限流时会说明应修改的设置。界面会在“搜索服务提示”中列出这些限制。
 
@@ -300,7 +301,7 @@ NLG 还会在不经过模型的情况下，把每个保存的图的运行环境�
 | `GET /api/sessions/{id}/graph` | 正在运行、等待审批或最近一轮的工作流图（`?task_id=` 指定本会话的其他轮次） |
 | `PUT /api/sessions/{id}/risk-level` | 设置风险级别 `{risk_level}` |
 | `DELETE /api/sessions/{id}/workspace` | 撤销报告目录 |
-| `POST /api/sessions/{id}/messages` | 运行一轮 `{api_key, message, provider?, model?, auto_retry?}` |
+| `POST /api/sessions/{id}/messages` | 运行一轮 `{api_key, message, provider?, model?, auto_retry?, openalex_api_key?}` |
 | `POST /api/sessions/{id}/approvals/{request_id}` | 作出决定 `{api_key, approved, comment?, provider?, model?}` 并继续本轮 |
 | `GET /api/knowledge` | 知识页面和待审核提案 |
 | `GET /api/knowledge/pages/{scope}/{slug}` | 读取一个页面 |

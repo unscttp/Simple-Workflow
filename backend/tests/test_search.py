@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from dataclasses import replace
 from unittest import mock
@@ -176,8 +177,8 @@ class OpenAlexLimitTests(unittest.TestCase):
     def setUp(self):
         from app.tools import scholar
 
-        scholar.PACER.paused_until = 0.0
-        self.addCleanup(setattr, scholar.PACER, "paused_until", 0.0)
+        scholar.PACER.paused.clear()
+        self.addCleanup(scholar.PACER.paused.clear)
         sleeper = mock.patch("app.tools.scholar.time.sleep")
         self.sleep = sleeper.start()
         self.addCleanup(sleeper.stop)
@@ -196,6 +197,13 @@ class OpenAlexLimitTests(unittest.TestCase):
             with self.assertRaises(SearchError):
                 openalex_search()("again")  # paused: no request at all
             self.assertEqual(request.call_count, 1)
+        ok = response(payload={"results": []})
+        with mock.patch("httpx.request", return_value=ok) as request:
+            openalex_search()("with a key", api_key="user-key")  # its own budget
+            self.assertEqual(request.call_count, 1)
+            self.assertEqual(
+                request.call_args.kwargs["headers"], {"Authorization": "Bearer user-key"}
+            )
 
     def test_short_rate_limits_are_waited_out_once(self):
         busy = response(429, text="Too Many Requests")
@@ -232,6 +240,52 @@ class ScholarToolTests(ApiCase):
         self.assertEqual(self.client.get("/health").json()["search"], "web")
         search = self.client.get("/api/providers").json()["search"]
         self.assertEqual(search, {"web": "web", "scholar_key": False})
+
+
+class RequestKeyTests(ApiCase):
+    def test_a_key_from_the_browser_is_used_for_that_request_only(self):
+        self.send(
+            "找论文",
+            call("scholar_search", query="Annales school"),
+            answer("好"),
+            openalex_api_key="  user-openalex-key  ",
+        )
+        self.assertEqual(self.scholar.calls[-1]["api_key"], "user-openalex-key")
+        self.send("再找", call("scholar_search", query="Braudel"), answer("好"))
+        self.assertNotIn("api_key", self.scholar.calls[-1])  # next request: server default
+        stored = "".join(
+            p.read_text("utf-8", "ignore") for p in self.root.rglob("*") if p.is_file()
+        )
+        self.assertNotIn("user-openalex-key", stored)
+        self.assertEqual(self.app.state.agent._request_keys, {})
+
+    def test_graph_stages_get_the_key_too(self):
+        self.set_risk("high")
+        stages = [
+            answer("RQ1"),
+            call("scholar_search", query="Annales school"),
+            answer("[1] ..."),
+            answer("taxonomy"),
+            answer("not saved"),
+            answer("done"),
+        ]
+        turn = self.send(
+            "综述",
+            call("skill_survey-creator_invoke"),
+            lambda t: call(
+                "skill_survey-creator_run_graph",
+                invoke_id=json.loads(t.steps[0].output)["invoke_id"],
+                graph_id="survey-pipeline",
+            ),
+            openalex_api_key="stage-key",
+        )
+        self.model.steps.extend(stages)
+        response = self.client.post(
+            f"/api/sessions/{self.session['id']}/approvals/{turn['pending_approvals'][0]['id']}",
+            json={"api_key": "sk-test", "approved": True, "openalex_api_key": "stage-key"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.scholar.calls[-1]["api_key"], "stage-key")
 
 
 if __name__ == "__main__":

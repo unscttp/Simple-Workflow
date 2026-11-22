@@ -27,6 +27,7 @@ export type ModelChoice = {
   api_key: string;
   model?: string;
   auto_retry?: boolean; // retry requests that time out or fail to connect
+  openalex_api_key?: string; // the user's own OpenAlex key for scholar_search
 };
 
 export type TurnStats = {

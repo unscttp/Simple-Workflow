@@ -32,12 +32,13 @@ def build_tools(
     search: SearchFunction,
     scholar: ScholarFunction,
     search_source: str = "web",
+    scholar_key_for: Callable | None = None,
     session_of: Callable[[Task], str] | None = None,
     skills_dir: Path | None = None,
 ) -> LocalToolModule:
     module = LocalToolModule()
     module.register(WEB_SEARCH, web_search_handler(search, search_source))
-    module.register(SCHOLAR_SEARCH, scholar_search_handler(scholar))
+    module.register(SCHOLAR_SEARCH, scholar_search_handler(scholar, scholar_key_for))
     for definition, handler in ANALYSIS_TOOLS:
         module.register(definition, handler)
     for definition, handler in ReportTools(sessions, reports_root, session_of).tools():

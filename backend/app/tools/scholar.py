@@ -8,6 +8,7 @@ real literature instead of whatever a general web search returns.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 import time
 from collections.abc import Callable
@@ -89,13 +90,16 @@ def _paper(work: dict) -> dict:
 
 
 class _Pacer:
-    """Spacing between requests, and a pause after the budget ran out (process-wide)."""
+    """Spacing between requests, and pauses after a budget ran out (process-wide).
+
+    Budgets are per API key (and one shared budget without a key), so a pause
+    applies only to the key whose budget is used up.
+    """
 
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.last = 0.0
-        self.paused_until = 0.0
-        self.pause_message = ""
+        self.paused: dict[str, tuple[float, str]] = {}  # budget -> (until, message)
 
     def wait(self) -> None:
         with self.lock:
@@ -108,17 +112,20 @@ class _Pacer:
 PACER = _Pacer()
 
 
-def openalex_search(api_key: str | None = None) -> ScholarFunction:
-    if api_key:
-        who, fix = "of this API key", "that the OpenAlex key's budget ran out for today"
-    else:
-        who = "shared by everyone on this server's IP address (no API key is configured)"
-        fix = "to get a free OpenAlex API key and set SW_OPENALEX_API_KEY"
-    quota_message = QUOTA_MESSAGE.format(who=who, fix=fix)
+def _budget(api_key: str | None) -> str:
+    if not api_key:
+        return "shared"
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
 
-    def request(params, headers):
-        if time.monotonic() < PACER.paused_until:
-            raise SearchError(PACER.pause_message)
+
+def openalex_search(default_key: str | None = None) -> ScholarFunction:
+    """OpenAlex search. A key passed per call (``api_key``) replaces ``default_key``."""
+
+    def request(params, headers, api_key):
+        budget = _budget(api_key)
+        until, message = PACER.paused.get(budget, (0.0, ""))
+        if time.monotonic() < until:
+            raise SearchError(message)
         for attempt in range(2):
             PACER.wait()
             try:
@@ -127,9 +134,21 @@ def openalex_search(api_key: str | None = None) -> ScholarFunction:
                 if exc.status != 429:
                     raise
                 if "budget" in exc.body.lower() or "daily" in exc.body.lower():
-                    PACER.paused_until = time.monotonic() + QUOTA_PAUSE_SECONDS
-                    PACER.pause_message = quota_message
-                    raise SearchError(quota_message) from None
+                    if api_key:
+                        who = "of this API key"
+                        fix = "that the OpenAlex key's budget ran out for today"
+                    else:
+                        who = (
+                            "shared by everyone on this server's IP address "
+                            "(no API key is configured)"
+                        )
+                        fix = (
+                            "to get a free OpenAlex API key and enter it in the settings "
+                            "panel or set SW_OPENALEX_API_KEY"
+                        )
+                    message = QUOTA_MESSAGE.format(who=who, fix=fix)
+                    PACER.paused[budget] = (time.monotonic() + QUOTA_PAUSE_SECONDS, message)
+                    raise SearchError(message) from None
                 if attempt == 1:
                     raise SearchError(
                         "OpenAlex is limiting requests (HTTP 429). Wait before searching again."
@@ -137,7 +156,8 @@ def openalex_search(api_key: str | None = None) -> ScholarFunction:
                 time.sleep(min(exc.retry_after or 1.0, MAX_RETRY_AFTER_SECONDS))
         raise AssertionError("unreachable")
 
-    def search(query, max_results=10, from_year=None, to_year=None, sort="relevance"):
+    def search(query, max_results=10, from_year=None, to_year=None, sort="relevance", api_key=None):
+        api_key = api_key or default_key
         params = {"search": query, "per-page": max_results}
         filters = []
         if from_year:
@@ -149,14 +169,20 @@ def openalex_search(api_key: str | None = None) -> ScholarFunction:
         if SORTS.get(sort):
             params["sort"] = SORTS[sort]
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        data = request(params, headers)
+        data = request(params, headers, api_key)
         return [_paper(work) for work in data.get("results") or []]
 
     return search
 
 
-def scholar_search_handler(search: ScholarFunction):
+def scholar_search_handler(search: ScholarFunction, key_for: Callable | None = None):
+    """``key_for(context)`` returns the request's own OpenAlex key, if the user gave one."""
+
     def handler(context, tool, args):
+        options = {}
+        key = key_for(context) if key_for is not None else None
+        if key:
+            options["api_key"] = key
         if args.get("from_year") and args.get("to_year") and args["from_year"] > args["to_year"]:
             raise ValueError("from_year must not be after to_year.")
         papers = search(
@@ -165,6 +191,7 @@ def scholar_search_handler(search: ScholarFunction):
             from_year=args.get("from_year"),
             to_year=args.get("to_year"),
             sort=args.get("sort", "relevance"),
+            **options,
         )
         reply = {"query": args["query"], "source": "openalex", "papers": papers}
         if not papers:

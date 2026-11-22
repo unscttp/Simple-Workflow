@@ -10,6 +10,7 @@ const keyName = (provider: ProviderId) => `api_key:${provider}`;
 const modelName = (provider: ProviderId) => `model:${provider}`;
 const LEGACY_DEEPSEEK_KEY = "deepseek_api_key";
 const AUTO_RETRY_KEY = "auto_retry";
+const OPENALEX_KEY = "api_key:openalex";
 
 function stored(name: string): string {
   try {
@@ -39,6 +40,7 @@ export function useModelChoice(
 ) {
   const [provider, setProvider] = useState<ProviderId | null>(null);
   const [autoRetry, setAutoRetry] = useState(autoRetryDefault);
+  const [openalexKey, setOpenalexKey] = useState("");
   const [keys, setKeys] = useState<Partial<Record<ProviderId, string>>>({});
   const [models, setModels] = useState<Partial<Record<ProviderId, string>>>({});
 
@@ -55,6 +57,7 @@ export function useModelChoice(
     setModels(Object.fromEntries(providers.map((p) => [p.id, stored(modelName(p.id))])));
     const saved = stored(PROVIDER_KEY) as ProviderId;
     setProvider(providers.some((p) => p.id === saved) ? saved : (defaultProvider ?? providers[0].id));
+    setOpenalexKey(stored(OPENALEX_KEY));
     const retry = stored(AUTO_RETRY_KEY);
     setAutoRetry(retry ? retry === "on" : autoRetryDefault);
   }, [providers, defaultProvider, autoRetryDefault]);
@@ -72,6 +75,10 @@ export function useModelChoice(
       setModels((current) => ({ ...current, [id]: value }));
       store(modelName(id), value.trim());
     },
+    openalexKey: (value: string) => {
+      setOpenalexKey(value);
+      store(OPENALEX_KEY, value.trim());
+    },
     autoRetry: (on: boolean) => {
       setAutoRetry(on);
       store(AUTO_RETRY_KEY, on ? "on" : "off");
@@ -82,20 +89,28 @@ export function useModelChoice(
   const model = provider ? (models[provider] ?? "").trim() : "";
   const choice: ModelChoice | null =
     provider && key
-      ? { provider, api_key: key, auto_retry: autoRetry, ...(model ? { model } : {}) }
+      ? {
+          provider,
+          api_key: key,
+          auto_retry: autoRetry,
+          ...(model ? { model } : {}),
+          ...(openalexKey.trim() ? { openalex_api_key: openalexKey.trim() } : {}),
+        }
       : null;
-  return { provider, keys, models, autoRetry, update, choice };
+  return { provider, keys, models, autoRetry, openalexKey, update, choice };
 }
 
 export function ModelSettings({
   providers,
   state,
   retryAttempts,
+  scholarKeyOnServer = false,
   disabled,
 }: {
   providers: Provider[];
   state: ReturnType<typeof useModelChoice>;
   retryAttempts?: number;
+  scholarKeyOnServer?: boolean;
   disabled: boolean;
 }) {
   const { provider, keys, models, update } = state;
@@ -192,6 +207,25 @@ export function ModelSettings({
           <p className="mt-1 text-xs text-slate-500">已读取 {options.length} 个模型，可在输入框中选择。</p>
         )}
         {listError && <p className="mt-1 text-xs text-red-600">{listError}</p>}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-slate-700" htmlFor="openalex-key">
+          OpenAlex API Key（可选）
+        </label>
+        <input
+          id="openalex-key"
+          type="password"
+          autoComplete="off"
+          value={state.openalexKey}
+          onChange={(event) => update.openalexKey(event.target.value)}
+          placeholder={scholarKeyOnServer ? "留空则使用服务器配置的密钥" : "留空则使用共享的免费额度"}
+          disabled={disabled}
+          className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 font-mono text-sm outline-none focus:border-amber-400 focus:bg-white"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          学术检索（scholar_search）使用。只保存在浏览器本地，随请求发送，后端不会保存。
+        </p>
       </div>
 
       <label className="flex items-start gap-2 text-sm text-slate-700">

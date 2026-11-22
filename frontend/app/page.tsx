@@ -222,12 +222,16 @@ export default function HomePage() {
             providers={providers?.providers ?? []}
             state={modelChoice}
             retryAttempts={providers?.auto_retry.attempts}
+            scholarKeyOnServer={providers?.search.scholar_key}
             disabled={busy}
           />
 
           <RiskSelector session={session} disabled={busy || pending.length > 0} onChange={handleRiskLevel} />
           <WorkspacePanel session={session} disabled={busy} onRevoke={handleRevoke} />
-          <SearchNotice search={providers?.search} />
+          <SearchNotice
+            search={providers?.search}
+            browserScholarKey={Boolean(modelChoice.openalexKey.trim())}
+          />
 
           <div className="mt-6 rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
             <p className="font-medium">可直接尝试：</p>

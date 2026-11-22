@@ -89,6 +89,7 @@ def create_app(
             api_key=request.api_key,
             model=request.model,
             auto_retry=request.auto_retry,
+            openalex_api_key=(request.openalex_api_key or "").strip() or None,
         )
 
     @app.get("/health")

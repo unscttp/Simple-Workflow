@@ -262,7 +262,10 @@ research papers. It supports a year range and sorting by relevance, citations
 or recency, and finds most with English keywords. The survey skill collects
 its sources with it. Without `SW_OPENALEX_API_KEY` it uses a free daily budget
 shared by everyone on the server's IP address, which a single survey can use
-up; get a free key from OpenAlex for real use. Requests are spaced 0.2 s apart,
+up; get a free key from OpenAlex for real use. A key can also be entered in the
+settings panel (OpenAlex API Key): like the model keys it stays in the browser,
+is sent with each request (`openalex_api_key`), replaces the server's key for
+that request, reaches generated graph stages too, and is never stored. Requests are spaced 0.2 s apart,
 a brief rate limit is waited out once, and once the daily budget is used up
 the tool stops asking OpenAlex for an hour and tells the model, in one clear
 message, not to retry and what to configure. Keyless web search answers "no
@@ -390,7 +393,7 @@ model can read from, and any change can be reverted through the API.
 | `GET /api/sessions/{id}/graph` | Workflow graph of the running, waiting or latest turn (`?task_id=` for another turn of the session) |
 | `PUT /api/sessions/{id}/risk-level` | Set the risk level `{risk_level}` |
 | `DELETE /api/sessions/{id}/workspace` | Revoke the report folder |
-| `POST /api/sessions/{id}/messages` | Run a turn `{api_key, message, provider?, model?, auto_retry?}` |
+| `POST /api/sessions/{id}/messages` | Run a turn `{api_key, message, provider?, model?, auto_retry?, openalex_api_key?}` |
 | `POST /api/sessions/{id}/approvals/{request_id}` | Decide `{api_key, approved, comment?, provider?, model?}` and continue the turn |
 | `GET /api/knowledge` | Knowledge pages and pending proposals |
 | `GET /api/knowledge/pages/{scope}/{slug}` | Read one page |

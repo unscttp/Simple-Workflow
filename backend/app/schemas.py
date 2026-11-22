@@ -23,6 +23,12 @@ class ModelCredentials(ApiKey):
     model: str | None = Field(
         default=None, description="Model ID; defaults to the provider's default model."
     )
+    openalex_api_key: str | None = Field(
+        default=None,
+        max_length=300,
+        description="The user's own OpenAlex key for scholar_search; replaces "
+        "SW_OPENALEX_API_KEY for this request. Never stored.",
+    )
     auto_retry: bool | None = Field(
         default=None,
         description="Retry model requests that time out or fail to connect; "

@@ -77,14 +77,20 @@ export function RiskSelector({
 }
 
 /** Search running without keys works, but can run out or be blocked: say so. */
-export function SearchNotice({ search }: { search?: { web: string; scholar_key: boolean } }) {
+export function SearchNotice({
+  search,
+  browserScholarKey = false,
+}: {
+  search?: { web: string; scholar_key: boolean };
+  browserScholarKey?: boolean;
+}) {
   if (!search) {
     return null;
   }
   const notes = [];
-  if (!search.scholar_key) {
+  if (!search.scholar_key && !browserScholarKey) {
     notes.push(
-      "学术检索（OpenAlex）未配置 API Key，使用服务器所在 IP 共享的免费日额度，可能很快用完。设置 SW_OPENALEX_API_KEY 可避免。",
+      "学术检索（OpenAlex）未配置 API Key，使用服务器所在 IP 共享的免费日额度，可能很快用完。可以在上方填入 OpenAlex API Key，或在服务器上设置 SW_OPENALEX_API_KEY。",
     );
   }
   if (search.web === "duckduckgo") {

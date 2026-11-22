@@ -59,6 +59,8 @@ class ModelChoice:
     api_key: str
     model: str | None = None
     auto_retry: bool | None = None  # None: on unless SW_MODEL_RETRIES is 0
+    # The user's own OpenAlex key for this request; replaces SW_OPENALEX_API_KEY.
+    openalex_api_key: str | None = None
 
 
 @dataclass
@@ -103,6 +105,9 @@ class AgentService:
         self.knowledge = KnowledgeStore(Path(settings.data_dir) / "knowledge")
         # Running turns and their generated-graph child tasks, for tools and the graph view.
         self.live = LiveTasks()
+        # Keys the user sent with the running request (turn id -> {"openalex": key}).
+        # Kept in memory for the length of the request only, never saved.
+        self._request_keys: dict[str, dict[str, str]] = {}
         self._running: dict[str, str] = {}  # session id -> id of the task running now
         # Web search: the backend configured in settings unless one is passed in (tests).
         search_source = "web"
@@ -114,6 +119,7 @@ class AgentService:
             reports_root=settings.reports_root,
             search=search,
             search_source=search_source,
+            scholar_key_for=self._openalex_key,
             scholar=scholar or openalex_search(settings.openalex_api_key or None),
             session_of=self.live.session_of,
             skills_dir=Path(settings.data_dir) / "skills",
@@ -142,6 +148,9 @@ class AgentService:
         workflow.node(NODE_TYPE).allowance = f"risk-{session.risk_level}"
         workflow.assert_valid()
         return workflow
+
+    def _openalex_key(self, context) -> str | None:
+        return self._request_keys.get(self.live.root_of(context.task), {}).get("openalex")
 
     def retries(self, choice: ModelChoice) -> int:
         """Automatic model retries for a request: the configured number, or 0 if off."""
@@ -224,7 +233,7 @@ class AgentService:
                 {"role": "user", "content": text, "task_id": task.id, "at": now()}
             )
             self.sessions.save(session)
-            return self._run(session.id, workflow, task, model, self.retries(choice))
+            return self._run(session.id, workflow, task, model, choice)
 
     def decide(
         self,
@@ -243,17 +252,19 @@ class AgentService:
             resolve_human_check(
                 task, request_id, approved, reviewer=f"session:{session.id}", comment=comment
             )
-            return self._run(session.id, self.workflow(session), task, model, self.retries(choice))
+            return self._run(session.id, self.workflow(session), task, model, choice)
 
     def _run(
-        self, session_id: str, workflow, task: Task, model: ChatModel, retries: int = 0
+        self, session_id: str, workflow, task: Task, model: ChatModel, choice: ModelChoice
     ) -> TurnResult:
-        engine = self.engine(model, retries)
+        engine = self.engine(model, self.retries(choice))
         label = {"provider": model.provider, "model": model.model}
         if label not in task.metadata.setdefault("models", []):
             task.metadata["models"].append(label)
         engine.task_pool.add(task)
         self._running[session_id] = task.id
+        if choice.openalex_api_key:
+            self._request_keys[task.id] = {"openalex": choice.openalex_api_key}
         try:
             while ready := engine.task_pool.ready():
                 for ready_task, execution in ready:
@@ -262,6 +273,7 @@ class AgentService:
                 engine.consolidate_knowledge(workflow, task)
         finally:
             self._running.pop(session_id, None)
+            self._request_keys.pop(task.id, None)
             self.live.release(task.id)
 
         # Tools may have changed the session (an approved folder), so reload it.
