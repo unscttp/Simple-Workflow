@@ -18,6 +18,7 @@ export type Providers = {
   default: ProviderId;
   providers: Provider[];
   auto_retry: { default: boolean; attempts: number };
+  search: { web: string; scholar_key: boolean };
 };
 
 // The model a request runs on. The key is sent with each request and never stored by the backend.
@@ -26,6 +27,7 @@ export type ModelChoice = {
   api_key: string;
   model?: string;
   auto_retry?: boolean; // retry requests that time out or fail to connect
+  openalex_api_key?: string; // the user's own OpenAlex key for scholar_search
 };
 
 export type TurnStats = {

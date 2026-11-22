@@ -25,6 +25,7 @@ from .schemas import (
     ProvidersView,
     ProviderView,
     RiskLevelRequest,
+    SearchView,
     SessionView,
     TurnResponse,
 )
@@ -88,6 +89,7 @@ def create_app(
             api_key=request.api_key,
             model=request.model,
             auto_retry=request.auto_retry,
+            openalex_api_key=(request.openalex_api_key or "").strip() or None,
         )
 
     @app.get("/health")
@@ -101,6 +103,7 @@ def create_app(
             auto_retry=AutoRetryView(
                 default=settings.model_retries > 0, attempts=settings.model_retries
             ),
+            search=SearchView(web=agent.search_source, scholar_key=bool(settings.openalex_api_key)),
             providers=[
                 ProviderView(
                     id=p.id, label=p.label, default_model=p.default_model, key_hint=p.key_hint

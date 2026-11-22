@@ -52,7 +52,17 @@ WEB_SEARCH = ToolDefinition(
 
 
 class SearchError(RuntimeError):
-    """A search request failed. The message never includes credentials."""
+    """A search request failed. The message never includes credentials.
+
+    ``status``, ``body`` and ``retry_after`` describe an HTTP failure, for callers
+    that handle rate limits.
+    """
+
+    def __init__(self, message: str, *, status=None, body: str = "", retry_after=None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.body = body
+        self.retry_after = retry_after
 
 
 def _hit(title, url, snippet) -> dict:
@@ -71,19 +81,47 @@ def _http(method: str, url: str, secret: str = "", **kwargs) -> dict:
     except httpx.HTTPError as exc:
         raise SearchError(f"Search request failed: {type(exc).__name__}.") from None
     if response.status_code >= 400:
-        reason = response.text[:200].replace(secret, "[key]") if secret else response.text[:200]
-        raise SearchError(f"Search failed with HTTP {response.status_code}: {reason}")
+        text = response.text.replace(secret, "[key]") if secret else response.text
+        try:
+            retry_after = float(response.headers.get("retry-after", ""))
+        except ValueError:
+            retry_after = None
+        raise SearchError(
+            f"Search failed with HTTP {response.status_code}: {text[:200]}",
+            status=response.status_code,
+            body=text[:1000],
+            retry_after=retry_after,
+        )
     try:
         return response.json()
     except ValueError:
         raise SearchError("The search service did not return JSON.") from None
 
 
-def duckduckgo_search(query: str, max_results: int) -> list[dict]:
+DDGS_BACKENDS = "duckduckgo,wikipedia"
+NO_KEY_HINT = (
+    "configure a search API (SW_TAVILY_API_KEY or SW_BRAVE_API_KEY) for dependable results"
+)
+
+
+def duckduckgo_search(query: str, max_results: int, backends: str = DDGS_BACKENDS) -> list[dict]:
+    """Keyless search through ``ddgs``: DuckDuckGo, with Wikipedia as a fallback."""
     from ddgs import DDGS
+    from ddgs.exceptions import DDGSException, RatelimitException, TimeoutException
 
     region = "cn-zh" if CJK.search(query) else "wt-wt"
-    hits = DDGS().text(query, region=region, max_results=max_results, backend="duckduckgo")
+    try:
+        hits = DDGS().text(query, region=region, max_results=max_results, backend=backends)
+    except RatelimitException:
+        raise SearchError(
+            f"DuckDuckGo is limiting requests from this server; {NO_KEY_HINT}."
+        ) from None
+    except TimeoutException:
+        raise SearchError("DuckDuckGo did not answer in time.") from None
+    except DDGSException as exc:
+        if str(exc).startswith("No results"):
+            return []  # ddgs raises instead of returning an empty list
+        raise SearchError(f"DuckDuckGo search failed: {str(exc)[:200]}") from None
     return [_hit(h.get("title"), h.get("href"), h.get("body")) for h in hits]
 
 
@@ -138,6 +176,9 @@ def search_backend(settings) -> tuple[str, SearchFunction]:
     }
     if choice == "auto":
         choice = next(name for name, make in options.items() if make)
+    if choice == "duckduckgo" and settings.ddgs_backends:
+        backends = settings.ddgs_backends
+        options["duckduckgo"] = lambda: lambda q, n: duckduckgo_search(q, n, backends)
     if choice not in options:
         raise ValueError(f"SW_SEARCH_PROVIDER must be auto or one of {sorted(options)}.")
     if not options[choice]:
@@ -155,6 +196,10 @@ def web_search_handler(search: SearchFunction, source: str = "web"):
         reply = {"query": args["query"], "source": source, "results": results}
         if not results:
             reply["note"] = EMPTY_NOTE
+            if source == "duckduckgo":
+                reply["note"] += (
+                    f" The keyless search may be blocked for this server; {NO_KEY_HINT}."
+                )
         return reply
 
     return handler

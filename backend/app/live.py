@@ -51,6 +51,18 @@ class LiveTasks:
             task = parent
         return task.metadata["session_id"]
 
+    def root_of(self, task: Task) -> str:
+        """The id of the turn a task belongs to (itself, or the root of its child chain)."""
+        seen = set()
+        while "session_id" not in task.metadata:
+            parent_id = task.metadata.get("parent_task_id")
+            parent = self.get(parent_id) if parent_id else None
+            if parent is None or parent.id in seen:
+                break
+            seen.add(parent.id)
+            task = parent
+        return task.id
+
     def release(self, root_id: str) -> None:
         """Forget a finished or paused turn: its task and every descendant."""
         with self._guard:

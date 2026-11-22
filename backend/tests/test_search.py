@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 from dataclasses import replace
 from unittest import mock
@@ -57,7 +58,7 @@ class BackendTests(unittest.TestCase):
             hits = duckduckgo_search("Annales school", 3)
             self.assertEqual(
                 ddgs.return_value.text.call_args.kwargs,
-                {"region": "wt-wt", "max_results": 3, "backend": "duckduckgo"},
+                {"region": "wt-wt", "max_results": 3, "backend": "duckduckgo,wikipedia"},
             )
             duckduckgo_search("年鉴学派", 3)
             self.assertEqual(ddgs.return_value.text.call_args.kwargs["region"], "cn-zh")
@@ -101,10 +102,27 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn("BSA-key", str(caught.exception))
 
     def test_empty_results_say_so(self):
-        reply = web_search_handler(lambda q, n: [], "duckduckgo")(None, None, {"query": "x"})
+        reply = web_search_handler(lambda q, n: [], "brave")(None, None, {"query": "x"})
         self.assertEqual(
-            (reply["results"], reply["note"], reply["source"]), ([], EMPTY_NOTE, "duckduckgo")
+            (reply["results"], reply["note"], reply["source"]), ([], EMPTY_NOTE, "brave")
         )
+        keyless = web_search_handler(lambda q, n: [], "duckduckgo")(None, None, {"query": "x"})
+        self.assertIn("SW_TAVILY_API_KEY", keyless["note"])
+
+    def test_duckduckgo_errors(self):
+        from ddgs.exceptions import DDGSException, RatelimitException
+
+        with mock.patch("ddgs.DDGS") as ddgs:
+            ddgs.return_value.text.side_effect = DDGSException("No results found.")
+            self.assertEqual(duckduckgo_search("x", 3), [])
+            ddgs.return_value.text.side_effect = RatelimitException("202 Ratelimit")
+            with self.assertRaisesRegex(SearchError, "limiting requests.*SW_BRAVE_API_KEY"):
+                duckduckgo_search("x", 3)
+        backend = search_backend(replace(Settings(), ddgs_backends="duckduckgo"))[1]
+        with mock.patch("ddgs.DDGS") as ddgs:
+            ddgs.return_value.text.return_value = []
+            backend("x", 2)
+            self.assertEqual(ddgs.return_value.text.call_args.kwargs["backend"], "duckduckgo")
 
 
 class ScholarTests(unittest.TestCase):
@@ -155,6 +173,53 @@ class ScholarTests(unittest.TestCase):
         self.assertIn("note", handler(None, None, {"query": "x"}))
 
 
+class OpenAlexLimitTests(unittest.TestCase):
+    def setUp(self):
+        from app.tools import scholar
+
+        scholar.PACER.paused.clear()
+        self.addCleanup(scholar.PACER.paused.clear)
+        sleeper = mock.patch("app.tools.scholar.time.sleep")
+        self.sleep = sleeper.start()
+        self.addCleanup(sleeper.stop)
+
+    def test_used_up_budget_pauses_searches_with_a_clear_message(self):
+        budget = response(
+            429,
+            text='{"error": "Rate limit exceeded", '
+            '"message": "Insufficient budget. This request has no API key"}',
+        )
+        with mock.patch("httpx.request", return_value=budget) as request:
+            with self.assertRaises(SearchError) as caught:
+                openalex_search()("Annales")
+            self.assertIn("SW_OPENALEX_API_KEY", str(caught.exception))
+            self.assertIn("Do not call scholar_search again", str(caught.exception))
+            with self.assertRaises(SearchError):
+                openalex_search()("again")  # paused: no request at all
+            self.assertEqual(request.call_count, 1)
+        ok = response(payload={"results": []})
+        with mock.patch("httpx.request", return_value=ok) as request:
+            openalex_search()("with a key", api_key="user-key")  # its own budget
+            self.assertEqual(request.call_count, 1)
+            self.assertEqual(
+                request.call_args.kwargs["headers"], {"Authorization": "Bearer user-key"}
+            )
+
+    def test_short_rate_limits_are_waited_out_once(self):
+        busy = response(429, text="Too Many Requests")
+        busy.headers["retry-after"] = "2"
+        ok = response(payload={"results": [ScholarTests.WORK]})
+        with mock.patch("httpx.request", side_effect=[busy, ok]) as request:
+            self.assertEqual(len(openalex_search("key")("x")), 1)
+        self.assertEqual(request.call_count, 2)
+        self.assertIn(mock.call(2.0), self.sleep.call_args_list)
+        with (
+            mock.patch("httpx.request", side_effect=[busy, busy]),
+            self.assertRaisesRegex(SearchError, "limiting requests"),
+        ):
+            openalex_search("key")("x")
+
+
 class ScholarToolTests(ApiCase):
     def test_the_assistant_can_search_literature(self):
         turn = self.send(
@@ -173,6 +238,54 @@ class ScholarToolTests(ApiCase):
         self.assertEqual(self.scholar.calls[0]["sort"], "cited")
         self.assertIn("scholar_search", self.model.tool_names())
         self.assertEqual(self.client.get("/health").json()["search"], "web")
+        search = self.client.get("/api/providers").json()["search"]
+        self.assertEqual(search, {"web": "web", "scholar_key": False})
+
+
+class RequestKeyTests(ApiCase):
+    def test_a_key_from_the_browser_is_used_for_that_request_only(self):
+        self.send(
+            "找论文",
+            call("scholar_search", query="Annales school"),
+            answer("好"),
+            openalex_api_key="  user-openalex-key  ",
+        )
+        self.assertEqual(self.scholar.calls[-1]["api_key"], "user-openalex-key")
+        self.send("再找", call("scholar_search", query="Braudel"), answer("好"))
+        self.assertNotIn("api_key", self.scholar.calls[-1])  # next request: server default
+        stored = "".join(
+            p.read_text("utf-8", "ignore") for p in self.root.rglob("*") if p.is_file()
+        )
+        self.assertNotIn("user-openalex-key", stored)
+        self.assertEqual(self.app.state.agent._request_keys, {})
+
+    def test_graph_stages_get_the_key_too(self):
+        self.set_risk("high")
+        stages = [
+            answer("RQ1"),
+            call("scholar_search", query="Annales school"),
+            answer("[1] ..."),
+            answer("taxonomy"),
+            answer("not saved"),
+            answer("done"),
+        ]
+        turn = self.send(
+            "综述",
+            call("skill_survey-creator_invoke"),
+            lambda t: call(
+                "skill_survey-creator_run_graph",
+                invoke_id=json.loads(t.steps[0].output)["invoke_id"],
+                graph_id="survey-pipeline",
+            ),
+            openalex_api_key="stage-key",
+        )
+        self.model.steps.extend(stages)
+        response = self.client.post(
+            f"/api/sessions/{self.session['id']}/approvals/{turn['pending_approvals'][0]['id']}",
+            json={"api_key": "sk-test", "approved": True, "openalex_api_key": "stage-key"},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.scholar.calls[-1]["api_key"], "stage-key")
 
 
 if __name__ == "__main__":

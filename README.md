@@ -70,6 +70,13 @@ In an existing clone, fetch it with `git submodule update --init`.
 
 ### Docker
 
+Server-side keys (OpenAlex, a web search API) go in a `.env` file next to
+`docker-compose.yml`, which git ignores; start from `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
 ```bash
 docker compose up --build
 ```
@@ -125,7 +132,8 @@ Backend settings are environment variables:
 | `SW_SEARCH_PROVIDER` | `auto` | Web search backend: `tavily`, `brave`, `searxng`, `duckduckgo`, or `auto` (see [Tools](#tools)) |
 | `SW_TAVILY_API_KEY` / `SW_BRAVE_API_KEY` | unset | Key of the Tavily or Brave Search API |
 | `SW_SEARXNG_URL` | unset | Base URL of a SearXNG instance with the JSON format enabled |
-| `SW_OPENALEX_API_KEY` | unset | Optional OpenAlex key for `scholar.search` (it works without one) |
+| `SW_OPENALEX_API_KEY` | unset | OpenAlex key for `scholar.search`; recommended (without one, a small free daily budget is shared by everyone on the server's IP address) |
+| `SW_DDGS_BACKENDS` | `duckduckgo,wikipedia` | Keyless web search: `ddgs` backends asked together |
 
 Framework settings for this app (prompt size budgets, knowledge review, limits)
 are in `backend/config/memory_settings.json`; see the NLG README for each key.
@@ -250,9 +258,19 @@ change the keywords or the tool. (Before this, the app used the deprecated
 unrelated pages or nothing.)
 
 **Scholarly search.** `scholar.search` queries OpenAlex, an open index of
-research papers, without a key. It supports a year range and sorting by
-relevance, citations or recency, and finds most with English keywords. The
-survey skill collects its sources with it.
+research papers. It supports a year range and sorting by relevance, citations
+or recency, and finds most with English keywords. The survey skill collects
+its sources with it. Without `SW_OPENALEX_API_KEY` it uses a free daily budget
+shared by everyone on the server's IP address, which a single survey can use
+up; get a free key from OpenAlex for real use. A key can also be entered in the
+settings panel (OpenAlex API Key): like the model keys it stays in the browser,
+is sent with each request (`openalex_api_key`), replaces the server's key for
+that request, reaches generated graph stages too, and is never stored. Requests are spaced 0.2 s apart,
+a brief rate limit is waited out once, and once the daily budget is used up
+the tool stops asking OpenAlex for an hour and tells the model, in one clear
+message, not to retry and what to configure. Keyless web search answers "no
+results" as an empty list (with a note) and reports rate limiting with the
+setting to change. The interface lists these limits under 搜索服务提示.
 
 Arguments are checked against each tool's JSON schema before it runs; errors
 are returned to the model so it can correct the call. File names must be plain
@@ -375,7 +393,7 @@ model can read from, and any change can be reverted through the API.
 | `GET /api/sessions/{id}/graph` | Workflow graph of the running, waiting or latest turn (`?task_id=` for another turn of the session) |
 | `PUT /api/sessions/{id}/risk-level` | Set the risk level `{risk_level}` |
 | `DELETE /api/sessions/{id}/workspace` | Revoke the report folder |
-| `POST /api/sessions/{id}/messages` | Run a turn `{api_key, message, provider?, model?, auto_retry?}` |
+| `POST /api/sessions/{id}/messages` | Run a turn `{api_key, message, provider?, model?, auto_retry?, openalex_api_key?}` |
 | `POST /api/sessions/{id}/approvals/{request_id}` | Decide `{api_key, approved, comment?, provider?, model?}` and continue the turn |
 | `GET /api/knowledge` | Knowledge pages and pending proposals |
 | `GET /api/knowledge/pages/{scope}/{slug}` | Read one page |

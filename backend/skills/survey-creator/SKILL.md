@@ -51,7 +51,9 @@ than searching further.
    Use `web_search` for what is not in journals: reports, documentation,
    datasets, news. If a search returns nothing or unrelated results, change the
    keywords or the tool instead of repeating it, and tell the user if sources
-   remain thin. Aim for 15-40 sources. Keep a numbered list: title, authors,
+   remain thin. If `scholar_search` says its budget is used up, do not call it
+   again in this task: pass on what to configure, and continue with the
+   sources you have and `web_search`. Aim for 15-40 sources. Keep a numbered list: title, authors,
    year, venue, DOI or URL, one-line finding.
 4. **Screen.** Drop duplicates, off-topic results and pages that are not
    scholarly or authoritative (marketing pages, unsourced blogs). Keep a short
