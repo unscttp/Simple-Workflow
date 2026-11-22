@@ -187,6 +187,9 @@ class ReportTools:
         session = self._session(context)
         session.workspace = str(path)
         self.sessions.save(session)
+        # Later steps of this turn, including generated graphs (which copy the
+        # turn's data), see the approved folder too.
+        context.task.data["workspace"] = str(path)
         context.record_activity(
             "workspace.granted", {"folder": str(path), "purpose": args["purpose"]}
         )

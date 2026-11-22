@@ -8,6 +8,8 @@ services:
       SW_CORS_ORIGINS: "http://localhost:${FRONTEND_PORT:-3000}"
       # Web search backend: auto picks Tavily, Brave or SearXNG when configured,
       # otherwise DuckDuckGo (keyless, can be rate-limited). Set these in .env.
+      SW_MODEL_RETRIES: "${SW_MODEL_RETRIES:-3}"
+      SW_MODEL_TIMEOUT_SECONDS: "${SW_MODEL_TIMEOUT_SECONDS:-300}"
       SW_SEARCH_PROVIDER: "${SW_SEARCH_PROVIDER:-auto}"
       SW_TAVILY_API_KEY: "${SW_TAVILY_API_KEY:-}"
       SW_BRAVE_API_KEY: "${SW_BRAVE_API_KEY:-}"

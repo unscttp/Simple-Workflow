@@ -20,7 +20,8 @@
         "answer": "/answer"
       },
       "react": {
-        "max_steps": 12
+        "max_steps": 30,
+        "on_step_limit": "answer"
       },
       "allowance": "risk-medium",
       "knowledge": {

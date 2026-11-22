@@ -58,6 +58,7 @@ class ModelChoice:
     provider: str
     api_key: str
     model: str | None = None
+    auto_retry: bool | None = None  # None: on unless SW_MODEL_RETRIES is 0
 
 
 @dataclass
@@ -82,6 +83,8 @@ def turn_stats(task: Task) -> dict:
         "tokens_estimated": any(d.get("meter") == "estimated" for d in decisions),
         # Finished calls: an approved call is requested again when the turn resumes.
         "tool_calls": sum(e["type"] in {"tool.completed", "tool.failed"} for e in task.events),
+        # Model requests repeated after a timeout, dropped connection or overload.
+        "retries": sum(e["type"].endswith(".retry") for e in task.events),
     }
 
 
@@ -140,7 +143,12 @@ class AgentService:
         workflow.assert_valid()
         return workflow
 
-    def engine(self, model: ChatModel) -> WorkflowEngine:
+    def retries(self, choice: ModelChoice) -> int:
+        """Automatic model retries for a request: the configured number, or 0 if off."""
+        enabled = choice.auto_retry if choice.auto_retry is not None else True
+        return self.settings.model_retries if enabled else 0
+
+    def engine(self, model: ChatModel, retries: int = 0) -> WorkflowEngine:
         engine = WorkflowEngine(
             self.allowances,
             tools=self.tools,
@@ -149,6 +157,7 @@ class AgentService:
         )
         engine.knowledge_trusted_actions |= TRUSTED_ACTIONS
         engine.add_run_observer(self.live.observe)
+        engine.setting_overrides = {"model_retry_attempts": retries}
         # Recorded with every run of a graph saved in a skill; when it differs later,
         # the skill listing tells the model the graph last worked with another model.
         engine.host_environment = {"model": f"{model.provider}/{model.model}"}
@@ -215,7 +224,7 @@ class AgentService:
                 {"role": "user", "content": text, "task_id": task.id, "at": now()}
             )
             self.sessions.save(session)
-            return self._run(session.id, workflow, task, model)
+            return self._run(session.id, workflow, task, model, self.retries(choice))
 
     def decide(
         self,
@@ -234,10 +243,12 @@ class AgentService:
             resolve_human_check(
                 task, request_id, approved, reviewer=f"session:{session.id}", comment=comment
             )
-            return self._run(session.id, self.workflow(session), task, model)
+            return self._run(session.id, self.workflow(session), task, model, self.retries(choice))
 
-    def _run(self, session_id: str, workflow, task: Task, model: ChatModel) -> TurnResult:
-        engine = self.engine(model)
+    def _run(
+        self, session_id: str, workflow, task: Task, model: ChatModel, retries: int = 0
+    ) -> TurnResult:
+        engine = self.engine(model, retries)
         label = {"provider": model.provider, "model": model.model}
         if label not in task.metadata.setdefault("models", []):
             task.metadata["models"].append(label)

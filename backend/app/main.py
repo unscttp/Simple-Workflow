@@ -16,6 +16,7 @@ from .agent import AgentService, ModelChoice, ModelFactory, NoPendingTurn, TurnI
 from .providers import ModelError, create_model, list_models
 from .schemas import (
     ApiKey,
+    AutoRetryView,
     DecisionRequest,
     KnowledgeView,
     MessageRequest,
@@ -86,6 +87,7 @@ def create_app(
             provider=request.provider or settings.default_provider,
             api_key=request.api_key,
             model=request.model,
+            auto_retry=request.auto_retry,
         )
 
     @app.get("/health")
@@ -96,6 +98,9 @@ def create_app(
     def providers() -> ProvidersView:
         return ProvidersView(
             default=settings.default_provider,
+            auto_retry=AutoRetryView(
+                default=settings.model_retries > 0, attempts=settings.model_retries
+            ),
             providers=[
                 ProviderView(
                     id=p.id, label=p.label, default_model=p.default_model, key_hint=p.key_hint

@@ -14,6 +14,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from workflow_core import TransientModelError as NLGTransientModelError
+
 _FUNCTION_NAME = re.compile(r"[^a-zA-Z0-9_-]")
 
 
@@ -70,6 +72,25 @@ class Reply:
 
 class ModelError(RuntimeError):
     """A model request failed. The message never includes credentials."""
+
+
+class TransientModelError(ModelError, NLGTransientModelError):
+    """A model request failed in a way a retry may fix: a timeout, a dropped
+    connection, rate limiting or an overloaded provider. NLG retries these when
+    automatic retries are on."""
+
+
+# Status codes after which the same request may well succeed.
+TRANSIENT_STATUS = {408, 409, 425, 429, 500, 502, 503, 504, 529}
+
+
+def request_failed(status: int | None, reason: str, what: str = "Model request") -> ModelError:
+    """The error for a failed request: transient for timeouts, overload and 5xx."""
+    if status is None:
+        return TransientModelError(f"{what} failed: {reason}.")
+    detail = f": {reason}" if reason else "."
+    error = TransientModelError if status in TRANSIENT_STATUS else ModelError
+    return error(f"{what} failed with HTTP {status}{detail}")
 
 
 _KEY_LIKE = re.compile(r"(sk-ant-[\w-]+|sk-[\w-]{8,}|AIza[\w-]{20,}|Bearer\s+\S+)")

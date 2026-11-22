@@ -18,7 +18,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import ModelError, Reply, ToolCall, Turn, parse_json_object, provider_message
+from .base import (
+    ModelError,
+    Reply,
+    ToolCall,
+    Turn,
+    parse_json_object,
+    provider_message,
+    request_failed,
+)
 
 MAX_TOKENS = 16000
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -40,9 +48,11 @@ def _wrap_errors(call, secrets=()):
     try:
         return call()
     except anthropic.APIStatusError as exc:
-        reason = provider_message(exc.body, secrets)
-        detail = f": {reason}" if reason else "."
-        raise ModelError(f"Model request failed with HTTP {exc.status_code}{detail}") from None
+        raise request_failed(exc.status_code, provider_message(exc.body, secrets)) from None
+    except anthropic.APITimeoutError:
+        raise request_failed(None, "the request timed out") from None
+    except anthropic.APIConnectionError:
+        raise request_failed(None, "could not connect") from None
     except anthropic.APIError as exc:
         raise ModelError(f"Model request failed: {type(exc).__name__}.") from None
 

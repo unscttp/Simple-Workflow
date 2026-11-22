@@ -54,6 +54,11 @@ STAGE_CONTEXT_NOTE = (
     "results of earlier nodes, workspace is the approved report folder when the turn "
     "started, knowledge lists reviewed notes and task_memory records what happened so far."
 )
+FINAL_ROUND_NOTE = (
+    "The step limit for this task is reached and no tools are available any more. "
+    "Give your final answer now, based on the steps below, and say plainly what is "
+    "missing or unfinished. Steps taken (tool, arguments, result) as JSON:"
+)
 WRITER_NOTE = " Write entries in the language of the conversation."
 NO_ANSWER = "（模型没有返回文本结果。）"
 
@@ -125,10 +130,14 @@ class AgentAdapter:
             "workspace": inputs.get("workspace"),
             "knowledge": payload.get("knowledge"),
             "task_memory": payload["task_memory"],
+            # Decisions this node may make, the final answer included; plan for it.
+            "step_limit": ((payload.get("node") or {}).get("react") or {}).get("max_steps"),
         }
         if instruction and "inputs" not in context:
             context["inputs"] = {
-                name: value for name, value in inputs.items() if name != "conversation"
+                name: value
+                for name, value in inputs.items()
+                if name not in ("conversation", "workspace")
             }
         if instruction:
             message, note = f"{STAGE_NOTE}\n{instruction}", STAGE_CONTEXT_NOTE
@@ -146,6 +155,15 @@ class AgentAdapter:
             replay_safe=payload.get("history_omitted_older_steps", 0) == 0
             and all((entry.get("model_state") or {}).get("prefix") == prefix for entry in history),
         )
+        if payload.get("react_final_round"):
+            # No tools now. Claude refuses tool-call history without tool definitions,
+            # so every provider gets the steps as text in the last message instead.
+            taken = [
+                {"tool": step.tool, "arguments": step.arguments, "result": step.output}
+                for step in steps
+            ]
+            turn.message += "\n\n" + FINAL_ROUND_NOTE + "\n" + json.dumps(taken, ensure_ascii=False)
+            turn.steps, turn.tools, turn.replay_safe = [], [], False
 
         reply = self.model.decide(turn)
         if reply.tool_call is not None:

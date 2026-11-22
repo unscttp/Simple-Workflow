@@ -20,7 +20,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .base import Reply, ToolCall, Turn, parse_arguments, parse_json_object, provider_message
+from .base import (
+    Reply,
+    ToolCall,
+    Turn,
+    parse_arguments,
+    parse_json_object,
+    provider_message,
+    request_failed,
+)
 from .gemini_schema import gemini_parameters
 
 JSON_NOTE = "\n\nRespond with a single JSON object and nothing else."
@@ -36,9 +44,11 @@ def wrap_openai_errors(call, secrets=(), what: str = "Model request"):
     try:
         return call()
     except openai.APIStatusError as exc:
-        reason = provider_message(exc.body, secrets)
-        detail = f": {reason}" if reason else "."
-        raise ModelError(f"{what} failed with HTTP {exc.status_code}{detail}") from None
+        raise request_failed(exc.status_code, provider_message(exc.body, secrets), what) from None
+    except openai.APITimeoutError:
+        raise request_failed(None, "the request timed out", what) from None
+    except openai.APIConnectionError:
+        raise request_failed(None, "could not connect", what) from None
     except openai.APIError as exc:
         raise ModelError(f"{what} failed: {type(exc).__name__}.") from None
 
@@ -51,11 +61,13 @@ class ChatCompletionsModel:
         client: Any,
         *,
         temperature: float | None = None,
+        max_tokens: int | None = None,
     ) -> None:
         self.provider = provider
         self.model = model
         self._client = client
         self._temperature = temperature
+        self._max_tokens = max_tokens
 
     def __repr__(self) -> str:
         return f"ChatCompletionsModel(provider={self.provider!r}, model={self.model!r})"
@@ -63,6 +75,8 @@ class ChatCompletionsModel:
     def _create(self, **request):
         if self._temperature is not None:
             request["temperature"] = self._temperature
+        if self._max_tokens is not None:
+            request["max_tokens"] = self._max_tokens
         return wrap_openai_errors(
             lambda: self._client.chat.completions.create(model=self.model, **request),
             secrets=(getattr(self._client, "api_key", None),),

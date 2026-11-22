@@ -41,6 +41,9 @@ def _providers_from_env() -> dict[str, Provider]:
             provider,
             default_model=model or provider.default_model,
             base_url=base_url or provider.base_url,
+            timeout_seconds=float(
+                os.environ.get("SW_MODEL_TIMEOUT_SECONDS", provider.timeout_seconds)
+            ),
         )
     return providers
 
@@ -60,6 +63,10 @@ class Settings:
     history_messages: int = 20
     default_risk_level: str = "medium"
     cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:3000"])
+    # Automatic retries of model requests that time out, lose their connection or
+    # find the provider overloaded: how many (0 switches them off). Each request can
+    # switch them on or off (the interface's 自动重连 option).
+    model_retries: int = 3
     # Web search backend (app.tools.research): auto, tavily, brave, searxng or duckduckgo.
     search_provider: str = "auto"
     tavily_api_key: str = field(default="", repr=False)
@@ -80,6 +87,7 @@ class Settings:
             history_messages=int(os.environ.get("SW_HISTORY_MESSAGES", cls.history_messages)),
             default_risk_level=os.environ.get("SW_DEFAULT_RISK_LEVEL", cls.default_risk_level),
             cors_origins=_list("SW_CORS_ORIGINS", ["http://localhost:3000"]),
+            model_retries=int(os.environ.get("SW_MODEL_RETRIES", cls.model_retries)),
             search_provider=os.environ.get("SW_SEARCH_PROVIDER", "auto").strip().lower(),
             tavily_api_key=os.environ.get("SW_TAVILY_API_KEY", "").strip(),
             brave_api_key=os.environ.get("SW_BRAVE_API_KEY", "").strip(),

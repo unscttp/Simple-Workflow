@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .anthropic_messages import ClaudeModel
-from .base import ChatModel, ModelError, provider_message
+from .base import ChatModel, ModelError, TransientModelError, provider_message, request_failed
 from .chat_completions import ChatCompletionsModel, wrap_openai_errors
 from .openai_responses import ResponsesModel
 
@@ -44,6 +44,8 @@ class Provider:
     default_model: str
     base_url: str | None
     key_hint: str
+    # Seconds to wait for an answer (SW_MODEL_TIMEOUT_SECONDS).
+    timeout_seconds: float = 300
 
 
 PROVIDERS: dict[str, Provider] = {
@@ -62,19 +64,30 @@ PROVIDERS: dict[str, Provider] = {
     )
 }
 
-TIMEOUT_SECONDS = 120
+# Waiting for an answer: long replies (a whole report) can take minutes. Connecting
+# should not. The SDKs' own retries are off: NLG retries transient failures when
+# automatic retries are on, and journals each attempt.
+TIMEOUT_SECONDS = 300
+CONNECT_TIMEOUT_SECONDS = 15
+DEEPSEEK_MAX_TOKENS = 8192
 
 
-def _openai_client(api_key: str, base_url: str | None):
+def _timeout(seconds: float):
+    import httpx
+
+    return httpx.Timeout(seconds, connect=CONNECT_TIMEOUT_SECONDS)
+
+
+def _openai_client(api_key: str, base_url: str | None, timeout: float = TIMEOUT_SECONDS):
     from openai import OpenAI
 
-    return OpenAI(api_key=api_key, base_url=base_url, timeout=TIMEOUT_SECONDS)
+    return OpenAI(api_key=api_key, base_url=base_url, timeout=_timeout(timeout), max_retries=0)
 
 
-def _anthropic_client(api_key: str, base_url: str | None):
+def _anthropic_client(api_key: str, base_url: str | None, timeout: float = TIMEOUT_SECONDS):
     from anthropic import Anthropic
 
-    return Anthropic(api_key=api_key, base_url=base_url, timeout=TIMEOUT_SECONDS)
+    return Anthropic(api_key=api_key, base_url=base_url, timeout=_timeout(timeout), max_retries=0)
 
 
 def _key(api_key: str) -> str:
@@ -86,13 +99,23 @@ def _key(api_key: str) -> str:
 def create_model(provider: Provider, api_key: str, model: str) -> ChatModel:
     key = _key(api_key)
     if provider.id == "anthropic":
-        return ClaudeModel(model, _anthropic_client(key, provider.base_url))
+        return ClaudeModel(
+            model, _anthropic_client(key, provider.base_url, provider.timeout_seconds)
+        )
     if provider.id == "openai":
-        return ResponsesModel(model, _openai_client(key, provider.base_url))
+        return ResponsesModel(
+            model, _openai_client(key, provider.base_url, provider.timeout_seconds)
+        )
     # Gemini recommends its default temperature; DeepSeek keeps the low value used so far.
-    temperature = 0.2 if provider.id == "deepseek" else None
+    # DeepSeek's chat model answers with at most 4096 tokens unless asked for more (up
+    # to 8192), too little for a report written in one tool call.
+    deepseek = provider.id == "deepseek"
     return ChatCompletionsModel(
-        provider.id, model, _openai_client(key, provider.base_url), temperature=temperature
+        provider.id,
+        model,
+        _openai_client(key, provider.base_url, provider.timeout_seconds),
+        temperature=0.2 if deepseek else None,
+        max_tokens=DEEPSEEK_MAX_TOKENS if deepseek else None,
     )
 
 
@@ -102,17 +125,17 @@ def list_models(provider: Provider, api_key: str) -> list[str]:
     if provider.id == "anthropic":
         import anthropic
 
-        client = _anthropic_client(key, provider.base_url)
+        client = _anthropic_client(key, provider.base_url, provider.timeout_seconds)
         try:
             ids = [model.id for model in client.models.list(limit=100)]
         except anthropic.APIStatusError as exc:
-            reason = provider_message(exc.body, (key,))
-            detail = f": {reason}" if reason else "."
-            raise ModelError(f"Listing models failed with HTTP {exc.status_code}{detail}") from None
+            raise request_failed(
+                exc.status_code, provider_message(exc.body, (key,)), "Listing models"
+            ) from None
         except anthropic.APIError as exc:
             raise ModelError(f"Listing models failed: {type(exc).__name__}.") from None
     else:
-        client = _openai_client(key, provider.base_url)
+        client = _openai_client(key, provider.base_url, provider.timeout_seconds)
         ids = [
             model.id
             for model in wrap_openai_errors(
@@ -134,6 +157,7 @@ __all__ = [
     "PROVIDERS",
     "ChatModel",
     "ModelError",
+    "TransientModelError",
     "Provider",
     "create_model",
     "list_models",
