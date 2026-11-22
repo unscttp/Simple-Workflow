@@ -3,6 +3,7 @@
   "description": "Research stages of the survey pipeline graph: search and read the survey-creator skill. No file access.",
   "actions": [
     "tool:web.search",
+    "tool:scholar.search",
     "tool:text.keywords",
     "tool:skill.survey-creator.invoke",
     "tool:skill.survey-creator.read",

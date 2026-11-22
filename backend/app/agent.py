@@ -35,7 +35,8 @@ from .providers import ChatModel, Provider, create_model
 from .sessions import RISK_LEVELS, Session, SessionStore, now
 from .settings import CONFIG_DIR, PROMPT_FILE, Settings
 from .tools import TRUSTED_ACTIONS, build_tools
-from .tools.research import SearchFunction, duckduckgo_search
+from .tools.research import SearchFunction, search_backend
+from .tools.scholar import ScholarFunction, openalex_search
 
 ModelFactory = Callable[[Provider, str, str], ChatModel]
 NODE_TYPE = "assistant"
@@ -90,7 +91,8 @@ class AgentService:
         settings: Settings,
         model_factory: ModelFactory = create_model,
         *,
-        search: SearchFunction = duckduckgo_search,
+        search: SearchFunction | None = None,
+        scholar: ScholarFunction | None = None,
     ) -> None:
         self.settings = settings
         self.model_factory = model_factory
@@ -99,10 +101,17 @@ class AgentService:
         # Running turns and their generated-graph child tasks, for tools and the graph view.
         self.live = LiveTasks()
         self._running: dict[str, str] = {}  # session id -> id of the task running now
+        # Web search: the backend configured in settings unless one is passed in (tests).
+        search_source = "web"
+        if search is None:
+            search_source, search = search_backend(settings)
+        self.search_source = search_source
         self.tools = build_tools(
             self.sessions,
             reports_root=settings.reports_root,
             search=search,
+            search_source=search_source,
+            scholar=scholar or openalex_search(settings.openalex_api_key or None),
             session_of=self.live.session_of,
             skills_dir=Path(settings.data_dir) / "skills",
         )

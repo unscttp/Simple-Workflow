@@ -3,6 +3,7 @@
   "description": "Writing stage of the survey pipeline graph: everything in survey-research plus saving and editing reports in the approved folder.",
   "actions": [
     "tool:web.search",
+    "tool:scholar.search",
     "tool:text.keywords",
     "tool:skill.survey-creator.invoke",
     "tool:skill.survey-creator.read",

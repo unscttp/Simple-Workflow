@@ -3,6 +3,7 @@
   "description": "Everything, including deleting reports (each deletion still needs approval).",
   "actions": [
     "tool:web.search",
+    "tool:scholar.search",
     "tool:data.analyze_trend",
     "tool:text.keywords",
     "tool:text.redact",

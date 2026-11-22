@@ -16,8 +16,8 @@ citation, not on length.
 
 ## Ground rules
 
-- **Never invent a source.** Every reference must come from a `web_search`
-  result you actually saw, with its URL. If the year, authors or venue are not
+- **Never invent a source.** Every reference must come from a `scholar_search`
+  or `web_search` result you actually saw, with its DOI or URL. If the year, authors or venue are not
   in the result, write what is known and mark the rest `[unverified]`; do not
   fill gaps from memory.
 - Cite with numbers in square brackets, `[3]` or `[2, 5]`, in order of first
@@ -37,11 +37,17 @@ citation, not on length.
 2. **Folder.** The survey is saved as a report, so the session needs an
    approved folder. If `workspace` in the context is empty, call
    `workspace_request_access` before collecting sources.
-3. **Collect sources** with `web_search`: start from the research questions,
-   then search for surveys, benchmark papers, and the main method families you
-   discover, in English and, where useful, in the conversation's language.
-   Aim for 15-40 sources. Keep a numbered list: title, authors, year, venue,
-   URL, one-line finding.
+3. **Collect sources.** Use `scholar_search` for the literature: it returns
+   real papers with authors, year, venue, DOI and citation count. Start from
+   the research questions, then search for existing surveys, highly cited
+   works (`sort: "cited"`) and recent work (`sort: "recent"` or `from_year`),
+   and the main method families you discover. Use English keywords (also for
+   topics in other languages, adding the original-language term where useful).
+   Use `web_search` for what is not in journals: reports, documentation,
+   datasets, news. If a search returns nothing or unrelated results, change the
+   keywords or the tool instead of repeating it, and tell the user if sources
+   remain thin. Aim for 15-40 sources. Keep a numbered list: title, authors,
+   year, venue, DOI or URL, one-line finding.
 4. **Screen.** Drop duplicates, off-topic results and pages that are not
    scholarly or authoritative (marketing pages, unsourced blogs). Keep a short
    note of what you excluded and why for the Method section.
