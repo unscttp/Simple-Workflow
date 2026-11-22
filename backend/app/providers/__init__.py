@@ -63,6 +63,7 @@ PROVIDERS: dict[str, Provider] = {
 }
 
 TIMEOUT_SECONDS = 120
+DEEPSEEK_MAX_TOKENS = 8192
 
 
 def _openai_client(api_key: str, base_url: str | None):
@@ -90,9 +91,15 @@ def create_model(provider: Provider, api_key: str, model: str) -> ChatModel:
     if provider.id == "openai":
         return ResponsesModel(model, _openai_client(key, provider.base_url))
     # Gemini recommends its default temperature; DeepSeek keeps the low value used so far.
-    temperature = 0.2 if provider.id == "deepseek" else None
+    # DeepSeek's chat model answers with at most 4096 tokens unless asked for more (up
+    # to 8192), too little for a report written in one tool call.
+    deepseek = provider.id == "deepseek"
     return ChatCompletionsModel(
-        provider.id, model, _openai_client(key, provider.base_url), temperature=temperature
+        provider.id,
+        model,
+        _openai_client(key, provider.base_url),
+        temperature=0.2 if deepseek else None,
+        max_tokens=DEEPSEEK_MAX_TOKENS if deepseek else None,
     )
 
 

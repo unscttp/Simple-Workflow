@@ -43,7 +43,10 @@ frontend (Next.js) ──HTTP──> backend (FastAPI)
 
 - Every message you send starts one task of the `chat-turn` workflow
   (`backend/config/workflow.json`): a single LLM node that may call tools in a
-  loop and then answers.
+  loop and then answers. It has up to 30 model decisions per stretch (counted
+  again after each approval) and is told the limit; if they run out, it gets
+  one more round without tools to answer with what it found (NLG's
+  `react.on_step_limit: "answer"`) instead of failing.
 - The model is called with native tool calling. The adapter
   (`backend/app/model.py`) turns the framework's prompt into a
   provider-neutral turn (chat messages, tool definitions, earlier tool calls
@@ -163,7 +166,8 @@ How each provider continues after a tool call within one turn:
   `additionalProperties` are dropped and tools without parameters send none.
   The original schema is still checked by NLG before a tool runs.
 - **DeepSeek**: `reasoning_content` of thinking models is sent back with the
-  tool call of the same turn.
+  tool call of the same turn. Requests ask for up to 8192 output tokens (the
+  API's default is 4096, too little for a long report in one tool call).
 
 This state is stored with each step in the NLG journal (`model_state` of the
 framework's ReAct history) and is never shown to the model as text. Reasoning
@@ -272,7 +276,10 @@ depends on the risk level:
   runs. The research stages use the `survey-research` allowance (search and
   skill reading only), the writing stage `survey-writer` (adds saving and
   editing reports). Then `skill_survey-creator_script` runs the check script
-  on the saved file, again after your approval.
+  on the saved file, again after your approval. Stages have their own step
+  limits (scope 6, collect 24, organise 10, write 14) with the same last
+  round, receive the approved folder (also one approved earlier in the same
+  turn), and the writing stage saves long surveys in parts.
 
 ### Graphs remembered by the skill
 

@@ -40,7 +40,8 @@ frontend (Next.js) ──HTTP──> backend (FastAPI)
 ```
 
 - 你发送的每条消息都会启动一个 `chat-turn` 工作流任务（`backend/config/workflow.json`）：
-  只有一个 LLM 节点，它可以循环调用工具，最后给出回答。
+  只有一个 LLM 节点，它可以循环调用工具，最后给出回答。每段最多 30 次模型决策（每次审批后重新计数），并会告诉模型这个上限；
+  用完时不会直接失败，而是再给它一个不带工具的回合，根据已找到的信息作答（NLG 的 `react.on_step_limit: "answer"`）。
 - 模型通过原生 tool calling 调用。适配器（`backend/app/model.py`）把框架的提示词转换为与服务商无关的一轮请求
   （聊天消息、工具定义、本轮之前的工具调用及结果）；`backend/app/providers/` 中的各个服务商模块按各自 API 的格式发送，
   再把回复转换为工具调用或最终回答。
@@ -141,7 +142,8 @@ cd frontend && npm install && npm run dev
   Gemini 的工具只接受 JSON Schema 的一个子集，否则会拒绝整个请求（HTTP 400），因此发给它的工具 schema 会先转换
   （`backend/app/providers/gemini_schema.py`）：内联 `$ref`，类型列表改为 `nullable`，为 enum 补上类型，
   删除 `additionalProperties` 等关键字，没有参数的工具不发送参数。工具运行前 NLG 仍会按原始 schema 校验参数。
-- **DeepSeek**：思考模型的 `reasoning_content` 会随同一轮的工具调用发回。
+- **DeepSeek**：思考模型的 `reasoning_content` 会随同一轮的工具调用发回。请求的输出上限设为 8192 个 token
+  （API 默认 4096，不足以在一次工具调用中写出长报告）。
 
 这些状态随每一步保存在 NLG 日志中（框架 ReAct 历史的 `model_state`），从不以文本形式展示给模型。
 推理状态与生成它的模型以及之前的请求内容绑定，因此只有在本轮的模型、系统提示词和工具都没有变化、
@@ -224,7 +226,8 @@ cd frontend && npm install && npm run dev
 - **high**：额外提供三个工具。`skill_survey-creator_run_graph` 运行技能中保存的图，`graph_create` 运行修改后的图，两者都作为生成图运行：运行前你会在审批卡片中看到各阶段及其权限，
   运行时工作流图视图会跟踪子任务。研究阶段使用 `survey-research` allowance（只能搜索和读取技能），
   撰写阶段使用 `survey-writer`（另可保存和编辑报告）。之后 `skill_survey-creator_script` 会对保存的文件运行检查脚本，
-  同样需要你批准。
+  同样需要你批准。各阶段有各自的步数上限（scope 6、collect 24、organise 10、write 14），同样有最后一个回合；
+  它们能拿到已批准的目录（包括本轮中刚刚批准的目录），撰写阶段会分段保存较长的综述。
 
 ### 技能记住的图
 

@@ -30,6 +30,11 @@ citation, not on length.
 
 ## Steps
 
+The context says how many decisions you have for this task (`step_limit`).
+Plan for it: a survey without the workflow graph takes about 15-25 (searches
+included). If you are close to the limit, write and save what you have rather
+than searching further.
+
 1. **Scope.** Agree the topic, research questions (2-4), time window and what
    is in or out of scope. If the request is vague, propose a scope in one
    message and continue with it unless the user objects. Read
@@ -56,8 +61,10 @@ citation, not on length.
    works along 4-6 dimensions.
 6. **Write** the survey following the outline, with citations in the format of
    `references/citations.md` (numeric, with APA-like or GB/T 7714 entries).
-   Save it with `reports_save` as Markdown unless the user asked for another
-   format.
+   Save it as Markdown unless the user asked for another format, and save it
+   in parts so no single reply gets too long: the title, abstract and first
+   sections with `reports_save`, then each further group of sections with
+   `reports_edit` in `append` mode, up to about 1500 words per call.
 7. **Check.** If the tool `skill_survey-creator_script` is available, run
    `scripts/check_survey.py` with the saved file's full path as the only
    argument. It checks sections, citation numbering and reference recency. Fix
