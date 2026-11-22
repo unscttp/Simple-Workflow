@@ -134,6 +134,9 @@ cd frontend && npm install && npm run dev
   并给出拒绝类别。提示词前缀自动缓存；知识整理使用结构化输出。
 - **GPT**：请求不在服务端保存（`store: false`）；每一步的加密推理条目和函数调用会在下一次请求中发回。
 - **Gemini**：每个工具调用都带有 thought signature，本轮后续请求必须带上它；它随该步骤保存并发回。
+  Gemini 的工具只接受 JSON Schema 的一个子集，否则会拒绝整个请求（HTTP 400），因此发给它的工具 schema 会先转换
+  （`backend/app/providers/gemini_schema.py`）：内联 `$ref`，类型列表改为 `nullable`，为 enum 补上类型，
+  删除 `additionalProperties` 等关键字，没有参数的工具不发送参数。工具运行前 NLG 仍会按原始 schema 校验参数。
 - **DeepSeek**：思考模型的 `reasoning_content` 会随同一轮的工具调用发回。
 
 这些状态随每一步保存在 NLG 日志中（框架 ReAct 历史的 `model_state`），从不以文本形式展示给模型。
@@ -278,7 +281,7 @@ NLG 还会在不经过模型的情况下，把每个保存的图的运行环境�
 ## 数据与隐私
 
 - API Key 保存在浏览器本地存储中，随每次请求发送，只发给后端，且只发送所选服务商的 Key。后端只在该请求中使用它，不会写入会话、日志或记录，
-  模型错误信息也不会包含它。
+  服务商拒绝请求时会显示其原因（例如“HTTP 400: Please pass a valid API key”），其中任何看起来像密钥的内容都会被删除。
 - `SW_DATA_DIR` 保存会话（消息、风险级别、已批准目录）、每轮的日志（工具参数和结果）以及知识库。
 - 没有登录功能。任何能访问 API 的人都能使用和审核所有会话；请在本地运行，或部署在你自己的认证之后。
 
@@ -373,6 +376,6 @@ git -C third_party/nlg fetch origin && git -C third_party/nlg checkout <commit>
 - 只支持一个后端进程：同一会话的轮次在进程内串行执行，不跨进程协调。
 - 助手每一步只调用一个工具。
 - 网络搜索依赖 DuckDuckGo，可能被限流。
-- `graph.create` 工具的 schema 使用了 `$ref` 和 `anyOf`。Claude 和 GPT 可以接受；Gemini 的 OpenAI 兼容接口是否接受尚未测试。
+- Gemini schema 转换依据 Gemini 文档中的 schema 子集实现，并有离线测试覆盖，但尚未在真实 API 上运行过。
 - 工作流图视图在请求进行期间轮询；有多个后端进程时，只能看到由应答进程运行的轮次。
 - 使用脚本化模型和假的服务商客户端离线测试；接入真实模型后的表现取决于模型是否遵循 `system_prompt.md` 中的指令。

@@ -8,6 +8,11 @@ provider returns them:
   whose tool-call history lacks it;
 * DeepSeek thinking models return ``reasoning_content``, which is sent back
   on the assistant tool-call message of the same turn.
+
+For Gemini, tool schemas are converted to the subset Gemini accepts
+(``gemini_schema``), tool results carry the function name, and tool-call
+messages carry no empty text. Errors include the provider's reason with keys
+removed, so a refused request says why.
 """
 
 from __future__ import annotations
@@ -15,13 +20,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .base import Reply, ToolCall, Turn, parse_arguments, parse_json_object
+from .base import Reply, ToolCall, Turn, parse_arguments, parse_json_object, provider_message
+from .gemini_schema import gemini_parameters
 
 JSON_NOTE = "\n\nRespond with a single JSON object and nothing else."
 
 
-def wrap_openai_errors(call):
-    """Run an OpenAI SDK call, re-raising failures without their message text."""
+def wrap_openai_errors(call, secrets=(), what: str = "Model request"):
+    """Run an OpenAI SDK call; failures become ModelError with the provider's
+    reason, keys removed (the SDK's own exception is not chained)."""
     import openai
 
     from .base import ModelError
@@ -29,9 +36,11 @@ def wrap_openai_errors(call):
     try:
         return call()
     except openai.APIStatusError as exc:
-        raise ModelError(f"Model request failed with HTTP {exc.status_code}.") from None
+        reason = provider_message(exc.body, secrets)
+        detail = f": {reason}" if reason else "."
+        raise ModelError(f"{what} failed with HTTP {exc.status_code}{detail}") from None
     except openai.APIError as exc:
-        raise ModelError(f"Model request failed: {type(exc).__name__}.") from None
+        raise ModelError(f"{what} failed: {type(exc).__name__}.") from None
 
 
 class ChatCompletionsModel:
@@ -55,11 +64,11 @@ class ChatCompletionsModel:
         if self._temperature is not None:
             request["temperature"] = self._temperature
         return wrap_openai_errors(
-            lambda: self._client.chat.completions.create(model=self.model, **request)
+            lambda: self._client.chat.completions.create(model=self.model, **request),
+            secrets=(getattr(self._client, "api_key", None),),
         )
 
-    @staticmethod
-    def messages(turn: Turn) -> list[dict]:
+    def messages(self, turn: Turn) -> list[dict]:
         messages = [{"role": "system", "content": turn.system}, *turn.conversation]
         messages.append({"role": "user", "content": turn.message})
         for step in turn.steps:
@@ -76,27 +85,31 @@ class ChatCompletionsModel:
                 call["extra_content"] = {
                     "google": {"thought_signature": state["thought_signature"]}
                 }
-            assistant = {"role": "assistant", "content": "", "tool_calls": [call]}
+            # No text part: Gemini rejects empty text ("" content) with HTTP 400.
+            assistant = {"role": "assistant", "content": None, "tool_calls": [call]}
             if state.get("reasoning_content"):
                 assistant["reasoning_content"] = state["reasoning_content"]
             messages.append(assistant)
-            messages.append({"role": "tool", "tool_call_id": step.call_id, "content": step.output})
+            result = {"role": "tool", "tool_call_id": step.call_id, "content": step.output}
+            if self.provider == "gemini":
+                result["name"] = step.tool  # Gemini answers a function call by name
+            messages.append(result)
         return messages
+
+    def function(self, tool) -> dict:
+        function = {"name": tool.name, "description": tool.description}
+        if self.provider == "gemini":
+            parameters = gemini_parameters(tool.parameters)
+            if parameters is not None:
+                function["parameters"] = parameters
+        else:
+            function["parameters"] = tool.parameters
+        return {"type": "function", "function": function}
 
     def decide(self, turn: Turn) -> Reply:
         request: dict[str, Any] = {"messages": self.messages(turn)}
         if turn.tools:
-            request["tools"] = [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": tool.parameters,
-                    },
-                }
-                for tool in turn.tools
-            ]
+            request["tools"] = [self.function(tool) for tool in turn.tools]
         response = self._create(**request)
         message = response.choices[0].message
         usage = getattr(response, "usage", None)

@@ -152,6 +152,12 @@ How each provider continues after a tool call within one turn:
   items and the function call of each step are sent back on the next request.
 - **Gemini**: each tool call carries a thought signature, which Gemini requires
   in later requests of the turn; it is stored with the step and sent back.
+  Gemini accepts only a subset of JSON Schema for tools and refuses the whole
+  request (HTTP 400) otherwise, so tool schemas are converted for it
+  (`backend/app/providers/gemini_schema.py`): `$ref` is inlined, type lists
+  become `nullable`, enums get a type, keywords such as
+  `additionalProperties` are dropped and tools without parameters send none.
+  The original schema is still checked by NLG before a tool runs.
 - **DeepSeek**: `reasoning_content` of thinking models is sent back with the
   tool call of the same turn.
 
@@ -347,7 +353,9 @@ While a turn waits for a decision, new messages are refused with HTTP 409.
 
 - Your API keys are kept in the browser's local storage and sent with each
   request, only to the backend and only the key of the chosen provider. The backend uses it for that request only; it is never written to
-  sessions, journals or logs, and model errors are reported without it.
+  sessions, journals or logs. When a provider refuses a request, its reason is
+  shown (for example "HTTP 400: Please pass a valid API key") with anything
+  that looks like a key removed.
 - `SW_DATA_DIR` holds sessions (messages, risk level, approved folder), every
   turn's journal (tool arguments and results) and the knowledge base.
 - There is no login. Anyone who can reach the API can use and review every
@@ -471,8 +479,8 @@ another model continues from the same history.
   across processes.
 - The assistant calls one tool per step.
 - Web search depends on DuckDuckGo and can be rate-limited.
-- The `graph.create` tool schema uses `$ref` and `anyOf`. Claude and GPT accept
-  it; whether Gemini's OpenAI-compatible endpoint does is untested.
+- The Gemini schema conversion follows Gemini's documented schema subset and
+  is covered by offline tests; it has not yet been run against the live API.
 - The graph view is polled while a request runs; with several backend
   processes it only sees turns running in the process that answers.
 - Tested offline with a scripted model and fake provider clients; behaviour

@@ -72,6 +72,37 @@ class ModelError(RuntimeError):
     """A model request failed. The message never includes credentials."""
 
 
+_KEY_LIKE = re.compile(r"(sk-ant-[\w-]+|sk-[\w-]{8,}|AIza[\w-]{20,}|Bearer\s+\S+)")
+MAX_ERROR_CHARS = 300
+
+
+def provider_message(body, secrets=()) -> str:
+    """The provider's own error message from an error body, with keys removed.
+
+    Providers say why a request was refused ("API key not valid", "Invalid
+    value at tools[0]..."); showing that is what makes a 400 fixable. Every
+    known secret and anything shaped like an API key is replaced by "[key]".
+    """
+    message = ""
+    if isinstance(body, dict):
+        error = body.get("error", body)
+        if isinstance(error, dict):
+            message = str(error.get("message") or "")
+        elif isinstance(error, str):
+            message = error
+    elif isinstance(body, list) and body:
+        return provider_message(body[0], secrets)
+    elif isinstance(body, str):
+        message = body
+    for secret in secrets:
+        if secret:
+            message = message.replace(secret, "[key]")
+    message = _KEY_LIKE.sub("[key]", " ".join(message.split()))
+    if len(message) > MAX_ERROR_CHARS:
+        message = message[: MAX_ERROR_CHARS - 1] + "…"
+    return message
+
+
 class ChatModel(Protocol):
     provider: str
     model: str

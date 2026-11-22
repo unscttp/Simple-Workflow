@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .anthropic_messages import ClaudeModel
-from .base import ChatModel, ModelError
+from .base import ChatModel, ModelError, provider_message
 from .chat_completions import ChatCompletionsModel, wrap_openai_errors
 from .openai_responses import ResponsesModel
 
@@ -106,12 +106,19 @@ def list_models(provider: Provider, api_key: str) -> list[str]:
         try:
             ids = [model.id for model in client.models.list(limit=100)]
         except anthropic.APIStatusError as exc:
-            raise ModelError(f"Listing models failed with HTTP {exc.status_code}.") from None
+            reason = provider_message(exc.body, (key,))
+            detail = f": {reason}" if reason else "."
+            raise ModelError(f"Listing models failed with HTTP {exc.status_code}{detail}") from None
         except anthropic.APIError as exc:
             raise ModelError(f"Listing models failed: {type(exc).__name__}.") from None
     else:
         client = _openai_client(key, provider.base_url)
-        ids = [model.id for model in wrap_openai_errors(lambda: list(client.models.list()))]
+        ids = [
+            model.id
+            for model in wrap_openai_errors(
+                lambda: list(client.models.list()), secrets=(key,), what="Listing models"
+            )
+        ]
         ids = [model_id.removeprefix("models/") for model_id in ids]
         if provider.id == "openai":
             ids = [
