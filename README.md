@@ -70,6 +70,13 @@ In an existing clone, fetch it with `git submodule update --init`.
 
 ### Docker
 
+Server-side keys (OpenAlex, a web search API) go in a `.env` file next to
+`docker-compose.yml`, which git ignores; start from `.env.example`:
+
+```bash
+cp .env.example .env
+```
+
 ```bash
 docker compose up --build
 ```

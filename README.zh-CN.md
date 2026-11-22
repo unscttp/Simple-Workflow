@@ -61,6 +61,12 @@ git clone --recurse-submodules https://github.com/unscttp/Simple-Workflow.git
 
 ### Docker
 
+服务端使用的密钥（OpenAlex、网络搜索 API）写在 `docker-compose.yml` 旁边的 `.env` 文件中（git 会忽略它），可以从 `.env.example` 复制：
+
+```bash
+cp .env.example .env
+```
+
 ```bash
 docker compose up --build
 ```
