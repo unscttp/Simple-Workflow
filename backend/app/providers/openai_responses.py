@@ -29,7 +29,8 @@ class ResponsesModel:
 
     def _create(self, **request):
         return wrap_openai_errors(
-            lambda: self._client.responses.create(model=self.model, store=False, **request)
+            lambda: self._client.responses.create(model=self.model, store=False, **request),
+            secrets=(getattr(self._client, "api_key", None),),
         )
 
     @staticmethod

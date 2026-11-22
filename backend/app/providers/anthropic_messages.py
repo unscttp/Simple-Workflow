@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .base import ModelError, Reply, ToolCall, Turn, parse_json_object
+from .base import ModelError, Reply, ToolCall, Turn, parse_json_object, provider_message
 
 MAX_TOKENS = 16000
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -34,13 +34,15 @@ THINKING_BLOCK_TYPES = {"thinking", "redacted_thinking"}
 PLAIN_BLOCK_TYPES = {"text", "tool_use"}
 
 
-def _wrap_errors(call):
+def _wrap_errors(call, secrets=()):
     import anthropic
 
     try:
         return call()
     except anthropic.APIStatusError as exc:
-        raise ModelError(f"Model request failed with HTTP {exc.status_code}.") from None
+        reason = provider_message(exc.body, secrets)
+        detail = f": {reason}" if reason else "."
+        raise ModelError(f"Model request failed with HTTP {exc.status_code}{detail}") from None
     except anthropic.APIError as exc:
         raise ModelError(f"Model request failed: {type(exc).__name__}.") from None
 
@@ -51,6 +53,7 @@ class ClaudeModel:
     def __init__(self, model: str, client: Any) -> None:
         self.model = model
         self._client = client
+        self._secrets = (getattr(client, "api_key", None),)
 
     def __repr__(self) -> str:
         return f"ClaudeModel(model={self.model!r})"
@@ -61,9 +64,10 @@ class ClaudeModel:
             return _wrap_errors(
                 lambda: self._client.beta.messages.create(
                     betas=[FALLBACK_BETA], fallbacks="default", **request
-                )
+                ),
+                self._secrets,
             )
-        return _wrap_errors(lambda: self._client.messages.create(**request))
+        return _wrap_errors(lambda: self._client.messages.create(**request), self._secrets)
 
     @staticmethod
     def _check_stop(response) -> None:
