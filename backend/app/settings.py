@@ -60,6 +60,13 @@ class Settings:
     history_messages: int = 20
     default_risk_level: str = "medium"
     cors_origins: list[str] = field(default_factory=lambda: ["http://localhost:3000"])
+    # Web search backend (app.tools.research): auto, tavily, brave, searxng or duckduckgo.
+    search_provider: str = "auto"
+    tavily_api_key: str = field(default="", repr=False)
+    brave_api_key: str = field(default="", repr=False)
+    searxng_url: str = ""
+    # Optional; OpenAlex (scholar.search) works without a key.
+    openalex_api_key: str = field(default="", repr=False)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -73,4 +80,9 @@ class Settings:
             history_messages=int(os.environ.get("SW_HISTORY_MESSAGES", cls.history_messages)),
             default_risk_level=os.environ.get("SW_DEFAULT_RISK_LEVEL", cls.default_risk_level),
             cors_origins=_list("SW_CORS_ORIGINS", ["http://localhost:3000"]),
+            search_provider=os.environ.get("SW_SEARCH_PROVIDER", "auto").strip().lower(),
+            tavily_api_key=os.environ.get("SW_TAVILY_API_KEY", "").strip(),
+            brave_api_key=os.environ.get("SW_BRAVE_API_KEY", "").strip(),
+            searxng_url=os.environ.get("SW_SEARXNG_URL", "").strip(),
+            openalex_api_key=os.environ.get("SW_OPENALEX_API_KEY", "").strip(),
         )

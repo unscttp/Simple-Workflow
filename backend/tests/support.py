@@ -64,6 +64,28 @@ class ScriptedModel:
         return json.loads(message[message.index("\n{") + 1 :])
 
 
+class ScholarStub:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self.papers = [
+            {
+                "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
+                "authors": ["Patrick Lewis"],
+                "year": 2020,
+                "venue": "NeurIPS",
+                "doi": "https://doi.org/10.48550/arXiv.2005.11401",
+                "url": "https://doi.org/10.48550/arXiv.2005.11401",
+                "open_access_url": None,
+                "cited_by": 5000,
+                "abstract": "Large pre-trained language models ...",
+            }
+        ]
+
+    def __call__(self, query, **options):
+        self.calls.append({"query": query, **options})
+        return self.papers[: options.get("max_results", 10)]
+
+
 class SearchStub:
     def __init__(self) -> None:
         self.results = [
@@ -87,6 +109,7 @@ class ApiCase(unittest.TestCase):
         self.model = ScriptedModel()
         self.factory_calls: list[tuple[str, str, str]] = []
         self.search = SearchStub()
+        self.scholar = ScholarStub()
         settings = Settings(
             data_dir=self.root / "data",
             knowledge_consolidation=self.knowledge_consolidation,
@@ -96,6 +119,7 @@ class ApiCase(unittest.TestCase):
             settings,
             model_factory=self.factory,
             search=self.search,
+            scholar=self.scholar,
             model_lister=lambda provider, key: [f"{provider.id}-model-a", f"{provider.id}-model-b"],
         )
         self.client = TestClient(self.app)

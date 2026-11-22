@@ -19,7 +19,7 @@
           "max_steps": 4
         },
         "config": {
-          "instruction": "This is one stage of a survey pipeline for the survey-creator skill. Follow the rules of the skill: never invent sources, cite only web_search results with their URLs, write in the language of the conversation. From the conversation and the latest message, write the survey scope: a working title, 2-4 numbered research questions, the time window, inclusion and exclusion criteria, and 8-15 web search queries (mix English and the conversation's language). Do not search. Answer with the scope only."
+          "instruction": "This is one stage of a survey pipeline for the survey-creator skill. Follow the rules of the skill: never invent sources, cite only scholar_search or web_search results with their DOI or URL, write in the language of the conversation. From the conversation and the latest message, write the survey scope: a working title, 2-4 numbered research questions, the time window, inclusion and exclusion criteria, and 8-15 search queries in English (add original-language terms where useful). Do not search. Answer with the scope only."
         }
       },
       {
@@ -37,7 +37,7 @@
           "max_steps": 14
         },
         "config": {
-          "instruction": "This is one stage of a survey pipeline for the survey-creator skill. Follow the rules of the skill: never invent sources, cite only web_search results with their URLs, write in the language of the conversation. Run the search queries from the scope with web_search (add queries for method families you discover). Screen the results: drop duplicates, off-topic and non-scholarly pages. Answer with a numbered source list, 15-40 entries if available, each as: title; authors; year; venue; URL; one-line finding. Mark missing details [unverified]. End with a short note of what was excluded and why."
+          "instruction": "This is one stage of a survey pipeline for the survey-creator skill. Follow the rules of the skill: never invent sources, cite only scholar_search or web_search results with their DOI or URL, write in the language of the conversation. Run the search queries from the scope with scholar_search (English keywords; also sort cited and recent; add queries for method families you discover), and use web_search only for reports, documentation and data that are not papers. If a search returns nothing or unrelated results, change the keywords instead of repeating it. Screen the results: drop duplicates, off-topic and non-scholarly pages. Answer with a numbered source list, 15-40 entries if available, each as: title; authors; year; venue; URL; one-line finding. Mark missing details [unverified]. End with a short note of what was excluded and why."
         }
       },
       {
@@ -56,7 +56,7 @@
           "max_steps": 4
         },
         "config": {
-          "instruction": "This is one stage of a survey pipeline for the survey-creator skill. Follow the rules of the skill: never invent sources, cite only web_search results with their URLs, write in the language of the conversation. Open the skill with skill_survey-creator_invoke, read references/structure.md and templates/outline.md with skill_survey-creator_read, then close it with skill_survey-creator_finish. Using only the given sources, answer with: the taxonomy (3-6 categories by mechanism, each with its source numbers), a Markdown comparison table of the main works along 4-6 dimensions, and a section-by-section outline that says which sources each section cites."
+          "instruction": "This is one stage of a survey pipeline for the survey-creator skill. Follow the rules of the skill: never invent sources, cite only scholar_search or web_search results with their DOI or URL, write in the language of the conversation. Open the skill with skill_survey-creator_invoke, read references/structure.md and templates/outline.md with skill_survey-creator_read, then close it with skill_survey-creator_finish. Using only the given sources, answer with: the taxonomy (3-6 categories by mechanism, each with its source numbers), a Markdown comparison table of the main works along 4-6 dimensions, and a section-by-section outline that says which sources each section cites."
         }
       },
       {
@@ -76,7 +76,7 @@
           "max_steps": 6
         },
         "config": {
-          "instruction": "This is one stage of a survey pipeline for the survey-creator skill. Follow the rules of the skill: never invent sources, cite only web_search results with their URLs, write in the language of the conversation. Open the skill with skill_survey-creator_invoke, read references/citations.md, then close it with skill_survey-creator_finish. Write the complete survey following the outline, with numbered citations in order of first use and a References section listing every cited source once with its URL. Save it with reports_save as format md (choose a short file name from the title). Answer with the saved file name and the abstract."
+          "instruction": "This is one stage of a survey pipeline for the survey-creator skill. Follow the rules of the skill: never invent sources, cite only scholar_search or web_search results with their DOI or URL, write in the language of the conversation. Open the skill with skill_survey-creator_invoke, read references/citations.md, then close it with skill_survey-creator_finish. Write the complete survey following the outline, with numbered citations in order of first use and a References section listing every cited source once with its URL. Save it with reports_save as format md (choose a short file name from the title). Answer with the saved file name and the abstract."
         }
       }
     ],

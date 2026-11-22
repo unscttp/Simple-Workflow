@@ -117,6 +117,10 @@ Backend settings are environment variables:
 | `SW_KNOWLEDGE_CONSOLIDATION` | `true` | After each turn, ask the model what is worth remembering (one extra model call) |
 | `SW_HISTORY_MESSAGES` | `20` | Earlier chat messages sent with each turn |
 | `SW_CORS_ORIGINS` | `http://localhost:3000` | Comma-separated origins allowed to call the API |
+| `SW_SEARCH_PROVIDER` | `auto` | Web search backend: `tavily`, `brave`, `searxng`, `duckduckgo`, or `auto` (see [Tools](#tools)) |
+| `SW_TAVILY_API_KEY` / `SW_BRAVE_API_KEY` | unset | Key of the Tavily or Brave Search API |
+| `SW_SEARXNG_URL` | unset | Base URL of a SearXNG instance with the JSON format enabled |
+| `SW_OPENALEX_API_KEY` | unset | Optional OpenAlex key for `scholar.search` (it works without one) |
 
 Framework settings for this app (prompt size budgets, knowledge review, limits)
 are in `backend/config/memory_settings.json`; see the NLG README for each key.
@@ -202,7 +206,8 @@ revoke the folder at any time; report tools stop working immediately.
 
 | Tool (model sees) | Risk | Approval | Purpose |
 | --- | --- | --- | --- |
-| `web.search` (`web_search`) | low | – | Web search (DuckDuckGo): titles, snippets, links |
+| `web.search` (`web_search`) | low | – | Web search: titles, snippets, links (backend below) |
+| `scholar.search` (`scholar_search`) | low | – | Academic papers from OpenAlex: authors, year, venue, DOI, citations, abstract |
 | `data.analyze_trend` (`data_analyze_trend`) | low | – | Count, mean, median, min, max and change of JSON numbers |
 | `text.keywords` (`text_keywords`) | low | – | Most frequent words of a text |
 | `text.redact` (`text_redact`) | low | – | Mask email addresses and phone numbers |
@@ -217,6 +222,21 @@ revoke the folder at any time; report tools stop working immediately.
 | `skill.survey-creator.script` | high | every call | Run the skill's `scripts/check_survey.py` |
 | `skill.survey-creator.run_graph` | high | every graph | Run a graph saved in the skill as a child task |
 | `graph.create` | high | every graph | Run a reviewed workflow graph as a child task |
+
+**Web search backends.** `SW_SEARCH_PROVIDER=auto` uses the first configured of
+Tavily (`SW_TAVILY_API_KEY`), Brave (`SW_BRAVE_API_KEY`) and SearXNG
+(`SW_SEARXNG_URL`), and otherwise DuckDuckGo through the `ddgs` library, which
+needs no key but scrapes a public page and can be rate-limited. For dependable
+results, configure an API. `GET /health` shows the backend in use, and every
+result names its `source`; empty results come with a note telling the model to
+change the keywords or the tool. (Before this, the app used the deprecated
+`duckduckgo_search` package, whose default backend scraped Bing and returned
+unrelated pages or nothing.)
+
+**Scholarly search.** `scholar.search` queries OpenAlex, an open index of
+research papers, without a key. It supports a year range and sorting by
+relevance, citations or recency, and finds most with English keywords. The
+survey skill collects its sources with it.
 
 Arguments are checked against each tool's JSON schema before it runs; errors
 are returned to the model so it can correct the call. File names must be plain
@@ -478,7 +498,10 @@ another model continues from the same history.
 - One backend process: turns of a session are serialised in memory, not
   across processes.
 - The assistant calls one tool per step.
-- Web search depends on DuckDuckGo and can be rate-limited.
+- Without a search API key, web search uses DuckDuckGo's public page and can be
+  rate-limited. The search backends and OpenAlex are tested against mocked
+  responses; they have not been run against the live services from this
+  repository's test environment.
 - The Gemini schema conversion follows Gemini's documented schema subset and
   is covered by offline tests; it has not yet been run against the live API.
 - The graph view is polled while a request runs; with several backend

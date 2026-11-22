@@ -3,6 +3,7 @@
   "description": "Everything in low, plus saving and editing reports and proposing knowledge.",
   "actions": [
     "tool:web.search",
+    "tool:scholar.search",
     "tool:data.analyze_trend",
     "tool:text.keywords",
     "tool:text.redact",

@@ -6,6 +6,13 @@ services:
     container_name: simple-workflow-backend
     environment:
       SW_CORS_ORIGINS: "http://localhost:${FRONTEND_PORT:-3000}"
+      # Web search backend: auto picks Tavily, Brave or SearXNG when configured,
+      # otherwise DuckDuckGo (keyless, can be rate-limited). Set these in .env.
+      SW_SEARCH_PROVIDER: "${SW_SEARCH_PROVIDER:-auto}"
+      SW_TAVILY_API_KEY: "${SW_TAVILY_API_KEY:-}"
+      SW_BRAVE_API_KEY: "${SW_BRAVE_API_KEY:-}"
+      SW_SEARXNG_URL: "${SW_SEARXNG_URL:-}"
+      SW_OPENALEX_API_KEY: "${SW_OPENALEX_API_KEY:-}"
     volumes:
       # Sessions, saved turns, the knowledge base and approved report folders.
       - sw-data:/data

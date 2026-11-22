@@ -108,6 +108,10 @@ cd frontend && npm install && npm run dev
 | `SW_KNOWLEDGE_CONSOLIDATION` | `true` | 每轮结束后询问模型哪些内容值得记住（多一次模型调用） |
 | `SW_HISTORY_MESSAGES` | `20` | 每轮随请求发送的历史消息条数 |
 | `SW_CORS_ORIGINS` | `http://localhost:3000` | 允许调用 API 的来源，逗号分隔 |
+| `SW_SEARCH_PROVIDER` | `auto` | 网络搜索后端：`tavily`、`brave`、`searxng`、`duckduckgo` 或 `auto`（见[工具](#工具)） |
+| `SW_TAVILY_API_KEY` / `SW_BRAVE_API_KEY` | 未设置 | Tavily 或 Brave Search API 的密钥 |
+| `SW_SEARXNG_URL` | 未设置 | 启用了 JSON 格式的 SearXNG 实例地址 |
+| `SW_OPENALEX_API_KEY` | 未设置 | `scholar.search` 可选的 OpenAlex 密钥（不设置也能使用） |
 
 本应用使用的框架设置（提示词大小预算、知识审核、各种上限）位于 `backend/config/memory_settings.json`，
 各项含义见 NLG 的 README。
@@ -170,7 +174,8 @@ cd frontend && npm install && npm run dev
 
 | 工具（模型看到的名称） | 风险 | 审批 | 用途 |
 | --- | --- | --- | --- |
-| `web.search`（`web_search`） | low | – | 网络搜索（DuckDuckGo）：标题、摘要、链接 |
+| `web.search`（`web_search`） | low | – | 网络搜索：标题、摘要、链接（后端见下文） |
+| `scholar.search`（`scholar_search`） | low | – | 来自 OpenAlex 的学术论文：作者、年份、期刊/会议、DOI、引用数、摘要 |
 | `data.analyze_trend`（`data_analyze_trend`） | low | – | JSON 数值的数量、均值、中位数、最小值、最大值和变化 |
 | `text.keywords`（`text_keywords`） | low | – | 文本中出现最多的词 |
 | `text.redact`（`text_redact`） | low | – | 遮盖邮箱地址和电话号码 |
@@ -185,6 +190,14 @@ cd frontend && npm install && npm run dev
 | `skill.survey-creator.script` | high | 每次调用 | 运行技能中的 `scripts/check_survey.py` |
 | `skill.survey-creator.run_graph` | high | 每个图 | 把技能中保存的图作为子任务运行 |
 | `graph.create` | high | 每个图 | 把经审核的工作流图作为子任务运行 |
+
+**网络搜索后端。** `SW_SEARCH_PROVIDER=auto` 会依次使用已配置的 Tavily（`SW_TAVILY_API_KEY`）、Brave（`SW_BRAVE_API_KEY`）
+和 SearXNG（`SW_SEARXNG_URL`），都没有配置时通过 `ddgs` 库使用 DuckDuckGo；后者不需要密钥，但抓取的是公开网页，可能被限流。
+想要稳定的结果，请配置一个搜索 API。`GET /health` 会显示正在使用的后端，每条结果都注明 `source`；结果为空时会附带提示，
+让模型换关键词或换工具。（此前应用使用已废弃的 `duckduckgo_search` 包，其默认后端抓取 Bing 网页，返回的结果与查询无关或为空。）
+
+**学术搜索。** `scholar.search` 查询开放的论文索引 OpenAlex，不需要密钥。支持年份范围，可以按相关度、引用数或时间排序，
+使用英文关键词效果最好。综述技能用它收集文献。
 
 工具运行前会按其 JSON schema 校验参数；错误会返回给模型，以便它修正调用。文件名只能是不含目录的普通名称。
 新增工具请参考 `skills/adding-tools/SKILL.md`。
@@ -375,7 +388,8 @@ git -C third_party/nlg fetch origin && git -C third_party/nlg checkout <commit>
 - 单用户，没有认证（见[数据与隐私](#数据与隐私)）。
 - 只支持一个后端进程：同一会话的轮次在进程内串行执行，不跨进程协调。
 - 助手每一步只调用一个工具。
-- 网络搜索依赖 DuckDuckGo，可能被限流。
+- 没有配置搜索 API 密钥时，网络搜索使用 DuckDuckGo 的公开网页，可能被限流。各搜索后端和 OpenAlex 的测试使用模拟响应，
+  尚未在本仓库的测试环境中对真实服务运行过。
 - Gemini schema 转换依据 Gemini 文档中的 schema 子集实现，并有离线测试覆盖，但尚未在真实 API 上运行过。
 - 工作流图视图在请求进行期间轮询；有多个后端进程时，只能看到由应答进程运行的轮次。
 - 使用脚本化模型和假的服务商客户端离线测试；接入真实模型后的表现取决于模型是否遵循 `system_prompt.md` 中的指令。

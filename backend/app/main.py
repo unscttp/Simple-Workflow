@@ -29,7 +29,8 @@ from .schemas import (
 )
 from .sessions import SessionNotFound
 from .settings import Settings
-from .tools.research import SearchFunction, duckduckgo_search
+from .tools.research import SearchFunction
+from .tools.scholar import ScholarFunction
 
 KNOWLEDGE_REVIEWER = "web-user"
 
@@ -37,13 +38,14 @@ KNOWLEDGE_REVIEWER = "web-user"
 def create_app(
     settings: Settings | None = None,
     model_factory: ModelFactory = create_model,
-    search: SearchFunction = duckduckgo_search,
+    search: SearchFunction | None = None,
+    scholar: ScholarFunction | None = None,
     model_lister=list_models,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     if settings.default_provider not in settings.providers:
         raise ValueError(f"SW_DEFAULT_PROVIDER must be one of {sorted(settings.providers)}.")
-    agent = AgentService(settings, model_factory, search=search)
+    agent = AgentService(settings, model_factory, search=search, scholar=scholar)
     app = FastAPI(title="Simple Workflow assistant", version="2.1.0")
     app.state.agent = agent
     app.add_middleware(
@@ -88,7 +90,7 @@ def create_app(
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok"}
+        return {"status": "ok", "search": agent.search_source}
 
     @app.get("/api/providers", response_model=ProvidersView)
     def providers() -> ProvidersView:

@@ -3,6 +3,7 @@
   "description": "Research, analysis and reading reports. No file changes.",
   "actions": [
     "tool:web.search",
+    "tool:scholar.search",
     "tool:data.analyze_trend",
     "tool:text.keywords",
     "tool:text.redact",
