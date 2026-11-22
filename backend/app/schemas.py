@@ -93,10 +93,16 @@ class AutoRetryView(BaseModel):
     attempts: int
 
 
+class SearchView(BaseModel):
+    web: str  # the web search backend in use
+    scholar_key: bool  # whether OpenAlex has an API key (otherwise a shared free budget)
+
+
 class ProvidersView(BaseModel):
     default: ProviderId
     providers: list[ProviderView]
     auto_retry: AutoRetryView
+    search: SearchView
 
 
 class ModelList(BaseModel):

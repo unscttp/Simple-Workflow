@@ -14,6 +14,7 @@ services:
       SW_TAVILY_API_KEY: "${SW_TAVILY_API_KEY:-}"
       SW_BRAVE_API_KEY: "${SW_BRAVE_API_KEY:-}"
       SW_SEARXNG_URL: "${SW_SEARXNG_URL:-}"
+      SW_DDGS_BACKENDS: "${SW_DDGS_BACKENDS:-duckduckgo,wikipedia}"
       SW_OPENALEX_API_KEY: "${SW_OPENALEX_API_KEY:-}"
     volumes:
       # Sessions, saved turns, the knowledge base and approved report folders.

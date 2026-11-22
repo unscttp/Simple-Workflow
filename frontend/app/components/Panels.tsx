@@ -76,6 +76,35 @@ export function RiskSelector({
   );
 }
 
+/** Search running without keys works, but can run out or be blocked: say so. */
+export function SearchNotice({ search }: { search?: { web: string; scholar_key: boolean } }) {
+  if (!search) {
+    return null;
+  }
+  const notes = [];
+  if (!search.scholar_key) {
+    notes.push(
+      "学术检索（OpenAlex）未配置 API Key，使用服务器所在 IP 共享的免费日额度，可能很快用完。设置 SW_OPENALEX_API_KEY 可避免。",
+    );
+  }
+  if (search.web === "duckduckgo") {
+    notes.push(
+      "网络搜索使用免密钥的 DuckDuckGo / Wikipedia，可能被限流。设置 SW_TAVILY_API_KEY 或 SW_BRAVE_API_KEY 会更稳定。",
+    );
+  }
+  if (!notes.length) {
+    return null;
+  }
+  return (
+    <div className="mt-4 space-y-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+      <p className="font-semibold">搜索服务提示</p>
+      {notes.map((note) => (
+        <p key={note}>{note}</p>
+      ))}
+    </div>
+  );
+}
+
 export function WorkspacePanel({
   session,
   disabled,

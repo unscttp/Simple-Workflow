@@ -8,17 +8,29 @@ real literature instead of whatever a general web search returns.
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable
 
 from workflow_core import ToolDefinition
 
-from .research import _http
+from .research import SearchError, _http
 
 OPENALEX_WORKS = "https://api.openalex.org/works"
 ScholarFunction = Callable[..., list[dict]]
 MAX_AUTHORS = 5
 ABSTRACT_CHARS = 600
 SORTS = {"relevance": None, "cited": "cited_by_count:desc", "recent": "publication_date:desc"}
+# OpenAlex allows a few requests per second; space them out across the process.
+MIN_INTERVAL_SECONDS = 0.2
+# After the daily budget is used up, stop asking for this long (it resets daily).
+QUOTA_PAUSE_SECONDS = 3600
+MAX_RETRY_AFTER_SECONDS = 5
+QUOTA_MESSAGE = (
+    "OpenAlex refused the request: the free daily budget {who} is used up (HTTP 429). "
+    "Do not call scholar_search again in this task. Tell the user {fix}, and continue "
+    "with web_search or the sources found so far."
+)
 
 SCHOLAR_SEARCH = ToolDefinition(
     "scholar.search",
@@ -76,7 +88,55 @@ def _paper(work: dict) -> dict:
     }
 
 
+class _Pacer:
+    """Spacing between requests, and a pause after the budget ran out (process-wide)."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.last = 0.0
+        self.paused_until = 0.0
+        self.pause_message = ""
+
+    def wait(self) -> None:
+        with self.lock:
+            delay = self.last + MIN_INTERVAL_SECONDS - time.monotonic()
+            if delay > 0:
+                time.sleep(delay)
+            self.last = time.monotonic()
+
+
+PACER = _Pacer()
+
+
 def openalex_search(api_key: str | None = None) -> ScholarFunction:
+    if api_key:
+        who, fix = "of this API key", "that the OpenAlex key's budget ran out for today"
+    else:
+        who = "shared by everyone on this server's IP address (no API key is configured)"
+        fix = "to get a free OpenAlex API key and set SW_OPENALEX_API_KEY"
+    quota_message = QUOTA_MESSAGE.format(who=who, fix=fix)
+
+    def request(params, headers):
+        if time.monotonic() < PACER.paused_until:
+            raise SearchError(PACER.pause_message)
+        for attempt in range(2):
+            PACER.wait()
+            try:
+                return _http("GET", OPENALEX_WORKS, api_key or "", params=params, headers=headers)
+            except SearchError as exc:
+                if exc.status != 429:
+                    raise
+                if "budget" in exc.body.lower() or "daily" in exc.body.lower():
+                    PACER.paused_until = time.monotonic() + QUOTA_PAUSE_SECONDS
+                    PACER.pause_message = quota_message
+                    raise SearchError(quota_message) from None
+                if attempt == 1:
+                    raise SearchError(
+                        "OpenAlex is limiting requests (HTTP 429). Wait before searching again."
+                    ) from None
+                time.sleep(min(exc.retry_after or 1.0, MAX_RETRY_AFTER_SECONDS))
+        raise AssertionError("unreachable")
+
     def search(query, max_results=10, from_year=None, to_year=None, sort="relevance"):
         params = {"search": query, "per-page": max_results}
         filters = []
@@ -89,7 +149,7 @@ def openalex_search(api_key: str | None = None) -> ScholarFunction:
         if SORTS.get(sort):
             params["sort"] = SORTS[sort]
         headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        data = _http("GET", OPENALEX_WORKS, api_key or "", params=params, headers=headers)
+        data = request(params, headers)
         return [_paper(work) for work in data.get("results") or []]
 
     return search

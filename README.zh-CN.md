@@ -114,7 +114,8 @@ cd frontend && npm install && npm run dev
 | `SW_SEARCH_PROVIDER` | `auto` | 网络搜索后端：`tavily`、`brave`、`searxng`、`duckduckgo` 或 `auto`（见[工具](#工具)） |
 | `SW_TAVILY_API_KEY` / `SW_BRAVE_API_KEY` | 未设置 | Tavily 或 Brave Search API 的密钥 |
 | `SW_SEARXNG_URL` | 未设置 | 启用了 JSON 格式的 SearXNG 实例地址 |
-| `SW_OPENALEX_API_KEY` | 未设置 | `scholar.search` 可选的 OpenAlex 密钥（不设置也能使用） |
+| `SW_OPENALEX_API_KEY` | 未设置 | `scholar.search` 使用的 OpenAlex 密钥；建议设置（不设置时，服务器所在 IP 上的所有用户共享一个很小的每日免费额度） |
+| `SW_DDGS_BACKENDS` | `duckduckgo,wikipedia` | 免密钥网络搜索：同时查询的 `ddgs` 后端 |
 
 本应用使用的框架设置（提示词大小预算、知识审核、各种上限）位于 `backend/config/memory_settings.json`，
 各项含义见 NLG 的 README。
@@ -205,8 +206,11 @@ cd frontend && npm install && npm run dev
 想要稳定的结果，请配置一个搜索 API。`GET /health` 会显示正在使用的后端，每条结果都注明 `source`；结果为空时会附带提示，
 让模型换关键词或换工具。（此前应用使用已废弃的 `duckduckgo_search` 包，其默认后端抓取 Bing 网页，返回的结果与查询无关或为空。）
 
-**学术搜索。** `scholar.search` 查询开放的论文索引 OpenAlex，不需要密钥。支持年份范围，可以按相关度、引用数或时间排序，
-使用英文关键词效果最好。综述技能用它收集文献。
+**学术搜索。** `scholar.search` 查询开放的论文索引 OpenAlex。支持年份范围，可以按相关度、引用数或时间排序，
+使用英文关键词效果最好。综述技能用它收集文献。没有设置 `SW_OPENALEX_API_KEY` 时，它使用服务器所在 IP 上所有用户共享的每日免费额度，
+一次综述就可能用完；实际使用请向 OpenAlex 申请免费密钥。请求之间至少间隔 0.2 秒；遇到短时限流会等待并重试一次；
+每日额度用完后，该工具会在一小时内不再请求 OpenAlex，并用一条清楚的消息告诉模型不要重试、需要配置什么。
+免密钥的网络搜索在“没有结果”时返回空列表（附说明），被限流时会说明应修改的设置。界面会在“搜索服务提示”中列出这些限制。
 
 工具运行前会按其 JSON schema 校验参数；错误会返回给模型，以便它修正调用。文件名只能是不含目录的普通名称。
 新增工具请参考 `skills/adding-tools/SKILL.md`。

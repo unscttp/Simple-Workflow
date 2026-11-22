@@ -18,6 +18,7 @@ export type Providers = {
   default: ProviderId;
   providers: Provider[];
   auto_retry: { default: boolean; attempts: number };
+  search: { web: string; scholar_key: boolean };
 };
 
 // The model a request runs on. The key is sent with each request and never stored by the backend.

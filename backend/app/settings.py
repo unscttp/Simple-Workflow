@@ -72,6 +72,9 @@ class Settings:
     tavily_api_key: str = field(default="", repr=False)
     brave_api_key: str = field(default="", repr=False)
     searxng_url: str = ""
+    # Keyless web search: ddgs backends tried together (Wikipedia keeps answering when
+    # DuckDuckGo blocks the server).
+    ddgs_backends: str = "duckduckgo,wikipedia"
     # Optional; OpenAlex (scholar.search) works without a key.
     openalex_api_key: str = field(default="", repr=False)
 
@@ -92,5 +95,6 @@ class Settings:
             tavily_api_key=os.environ.get("SW_TAVILY_API_KEY", "").strip(),
             brave_api_key=os.environ.get("SW_BRAVE_API_KEY", "").strip(),
             searxng_url=os.environ.get("SW_SEARXNG_URL", "").strip(),
+            ddgs_backends=os.environ.get("SW_DDGS_BACKENDS", "duckduckgo,wikipedia").strip(),
             openalex_api_key=os.environ.get("SW_OPENALEX_API_KEY", "").strip(),
         )

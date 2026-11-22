@@ -25,6 +25,7 @@ import {
   AuditTrail,
   KnowledgePanel,
   RiskSelector,
+  SearchNotice,
   ToolLogs,
   WorkspacePanel,
 } from "./components/Panels";
@@ -226,6 +227,7 @@ export default function HomePage() {
 
           <RiskSelector session={session} disabled={busy || pending.length > 0} onChange={handleRiskLevel} />
           <WorkspacePanel session={session} disabled={busy} onRevoke={handleRevoke} />
+          <SearchNotice search={providers?.search} />
 
           <div className="mt-6 rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
             <p className="font-medium">可直接尝试：</p>

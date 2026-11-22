@@ -125,7 +125,8 @@ Backend settings are environment variables:
 | `SW_SEARCH_PROVIDER` | `auto` | Web search backend: `tavily`, `brave`, `searxng`, `duckduckgo`, or `auto` (see [Tools](#tools)) |
 | `SW_TAVILY_API_KEY` / `SW_BRAVE_API_KEY` | unset | Key of the Tavily or Brave Search API |
 | `SW_SEARXNG_URL` | unset | Base URL of a SearXNG instance with the JSON format enabled |
-| `SW_OPENALEX_API_KEY` | unset | Optional OpenAlex key for `scholar.search` (it works without one) |
+| `SW_OPENALEX_API_KEY` | unset | OpenAlex key for `scholar.search`; recommended (without one, a small free daily budget is shared by everyone on the server's IP address) |
+| `SW_DDGS_BACKENDS` | `duckduckgo,wikipedia` | Keyless web search: `ddgs` backends asked together |
 
 Framework settings for this app (prompt size budgets, knowledge review, limits)
 are in `backend/config/memory_settings.json`; see the NLG README for each key.
@@ -250,9 +251,16 @@ change the keywords or the tool. (Before this, the app used the deprecated
 unrelated pages or nothing.)
 
 **Scholarly search.** `scholar.search` queries OpenAlex, an open index of
-research papers, without a key. It supports a year range and sorting by
-relevance, citations or recency, and finds most with English keywords. The
-survey skill collects its sources with it.
+research papers. It supports a year range and sorting by relevance, citations
+or recency, and finds most with English keywords. The survey skill collects
+its sources with it. Without `SW_OPENALEX_API_KEY` it uses a free daily budget
+shared by everyone on the server's IP address, which a single survey can use
+up; get a free key from OpenAlex for real use. Requests are spaced 0.2 s apart,
+a brief rate limit is waited out once, and once the daily budget is used up
+the tool stops asking OpenAlex for an hour and tells the model, in one clear
+message, not to retry and what to configure. Keyless web search answers "no
+results" as an empty list (with a note) and reports rate limiting with the
+setting to change. The interface lists these limits under 搜索服务提示.
 
 Arguments are checked against each tool's JSON schema before it runs; errors
 are returned to the model so it can correct the call. File names must be plain
