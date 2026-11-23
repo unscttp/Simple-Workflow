@@ -48,16 +48,19 @@ class Provider:
     timeout_seconds: float = 300
 
 
+# Default models: the providers' published IDs as of November 2026 (DeepSeek
+# retired deepseek-chat in July 2026; GPT-6.2 Astra needs the Responses API for
+# tool calls, which the openai provider uses). Override with SW_<PROVIDER>_MODEL.
 PROVIDERS: dict[str, Provider] = {
     provider.id: provider
     for provider in (
-        Provider("deepseek", "DeepSeek", "deepseek-chat", "https://api.deepseek.com", "sk-..."),
+        Provider("deepseek", "DeepSeek", "deepseek-v4-pro", "https://api.deepseek.com", "sk-..."),
         Provider("anthropic", "Claude (Anthropic)", "claude-opus-5-5", None, "sk-ant-..."),
-        Provider("openai", "GPT (OpenAI)", "gpt-5.5", "https://api.openai.com/v1", "sk-..."),
+        Provider("openai", "GPT (OpenAI)", "gpt-6.2-astra", "https://api.openai.com/v1", "sk-..."),
         Provider(
             "gemini",
             "Gemini (Google)",
-            "gemini-3.8-flash",
+            "gemini-4-hydrogen",
             "https://generativelanguage.googleapis.com/v1beta/openai/",
             "AIza...",
         ),
@@ -69,7 +72,7 @@ PROVIDERS: dict[str, Provider] = {
 # automatic retries are on, and journals each attempt.
 TIMEOUT_SECONDS = 300
 CONNECT_TIMEOUT_SECONDS = 15
-DEEPSEEK_MAX_TOKENS = 8192
+DEEPSEEK_MAX_TOKENS = 32768
 
 
 def _timeout(seconds: float):
@@ -107,8 +110,8 @@ def create_model(provider: Provider, api_key: str, model: str) -> ChatModel:
             model, _openai_client(key, provider.base_url, provider.timeout_seconds)
         )
     # Gemini recommends its default temperature; DeepSeek keeps the low value used so far.
-    # DeepSeek's chat model answers with at most 4096 tokens unless asked for more (up
-    # to 8192), too little for a report written in one tool call.
+    # DeepSeek answers with at most 4096 tokens unless asked for more (V4 allows far
+    # more), too little for a report written in one tool call.
     deepseek = provider.id == "deepseek"
     return ChatCompletionsModel(
         provider.id,

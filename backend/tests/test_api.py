@@ -315,7 +315,7 @@ class ProviderTests(ApiCase):
         self.assertEqual(
             self.factory_calls,
             [
-                ("deepseek", API_KEY, "deepseek-chat"),
+                ("deepseek", API_KEY, "deepseek-v4-pro"),
                 ("anthropic", API_KEY, "claude-opus-5-5"),
                 ("gemini", API_KEY, "gemini-custom"),
             ],

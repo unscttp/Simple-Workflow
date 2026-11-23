@@ -130,14 +130,15 @@ cd frontend && npm install && npm run dev
 
 | 服务商 | `provider` | API | 默认模型 |
 | --- | --- | --- | --- |
-| DeepSeek | `deepseek` | Chat Completions（`openai` SDK） | `deepseek-chat` |
+| DeepSeek | `deepseek` | Chat Completions（`openai` SDK） | `deepseek-v4-pro` |
 | Claude | `anthropic` | Messages（`anthropic` SDK） | `claude-opus-5-5` |
-| GPT | `openai` | Responses（`openai` SDK） | `gpt-5.5` |
-| Gemini | `gemini` | Google 的 OpenAI 兼容 Chat Completions 接口（`openai` SDK） | `gemini-3.8-flash` |
+| GPT | `openai` | Responses（`openai` SDK） | `gpt-6.2-astra` |
+| Gemini | `gemini` | Google 的 OpenAI 兼容 Chat Completions 接口（`openai` SDK） | `gemini-4-hydrogen` |
 
 界面在浏览器中为每个服务商分别保存一个 API Key 和一个模型。“读取可用模型”会向服务商查询该 Key 可用的模型
-（`POST /api/providers/{provider}/models`），也可以直接输入任意模型 ID。使用前请向服务商确认默认模型 ID，
-必要时用 `SW_<PROVIDER>_MODEL` 覆盖。
+（`POST /api/providers/{provider}/models`），也可以直接输入任意模型 ID。默认模型 ID 是各服务商截至 2026 年 11 月公布的 ID
+（DeepSeek 已于 2026 年 7 月停用 `deepseek-chat`；GPT-6.2 Astra 进行工具调用需要 Responses API，`openai` 服务商使用的正是它）。
+服务商更换模型名称时，可以通过“读取可用模型”选择新的模型，或设置 `SW_<PROVIDER>_MODEL`。
 
 同一轮内工具调用之后，各服务商如何继续：
 
@@ -151,7 +152,7 @@ cd frontend && npm install && npm run dev
   Gemini 的工具只接受 JSON Schema 的一个子集，否则会拒绝整个请求（HTTP 400），因此发给它的工具 schema 会先转换
   （`backend/app/providers/gemini_schema.py`）：内联 `$ref`，类型列表改为 `nullable`，为 enum 补上类型，
   删除 `additionalProperties` 等关键字，没有参数的工具不发送参数。工具运行前 NLG 仍会按原始 schema 校验参数。
-- **DeepSeek**：思考模型的 `reasoning_content` 会随同一轮的工具调用发回。请求的输出上限设为 8192 个 token
+- **DeepSeek**：思考模型的 `reasoning_content` 会随同一轮的工具调用发回。请求的输出上限设为 32768 个 token
   （API 默认 4096，不足以在一次工具调用中写出长报告）。
 
 这些状态随每一步保存在 NLG 日志中（框架 ReAct 历史的 `model_state`），从不以文本形式展示给模型。

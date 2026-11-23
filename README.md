@@ -142,16 +142,19 @@ are in `backend/config/memory_settings.json`; see the NLG README for each key.
 
 | Provider | `provider` | API | Default model |
 | --- | --- | --- | --- |
-| DeepSeek | `deepseek` | Chat Completions (`openai` SDK) | `deepseek-chat` |
+| DeepSeek | `deepseek` | Chat Completions (`openai` SDK) | `deepseek-v4-pro` |
 | Claude | `anthropic` | Messages (`anthropic` SDK) | `claude-opus-5-5` |
-| GPT | `openai` | Responses (`openai` SDK) | `gpt-5.5` |
-| Gemini | `gemini` | Google's OpenAI-compatible Chat Completions endpoint (`openai` SDK) | `gemini-3.8-flash` |
+| GPT | `openai` | Responses (`openai` SDK) | `gpt-6.2-astra` |
+| Gemini | `gemini` | Google's OpenAI-compatible Chat Completions endpoint (`openai` SDK) | `gemini-4-hydrogen` |
 
 The interface keeps one API key and one model per provider in the browser.
 "Load available models" asks the provider which models the key can use
 (`POST /api/providers/{provider}/models`); any model ID can also be typed in.
-Check the default model IDs against your provider before relying on them, and
-override them with `SW_<PROVIDER>_MODEL` if needed.
+The default IDs are the providers' published ones as of November 2026
+(DeepSeek retired `deepseek-chat` in July 2026; GPT-6.2 Astra needs the
+Responses API for tool calls, which the `openai` provider uses). When a
+provider renames a model, pick the new one with "Load available models" or set
+`SW_<PROVIDER>_MODEL`.
 
 How each provider continues after a tool call within one turn:
 
@@ -176,7 +179,7 @@ How each provider continues after a tool call within one turn:
   `additionalProperties` are dropped and tools without parameters send none.
   The original schema is still checked by NLG before a tool runs.
 - **DeepSeek**: `reasoning_content` of thinking models is sent back with the
-  tool call of the same turn. Requests ask for up to 8192 output tokens (the
+  tool call of the same turn. Requests ask for up to 32768 output tokens (the
   API's default is 4096, too little for a long report in one tool call).
 
 This state is stored with each step in the NLG journal (`model_state` of the

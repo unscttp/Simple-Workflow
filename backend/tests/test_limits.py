@@ -136,9 +136,9 @@ class RealisticRunTests(ApiCase):
 
 class OutputLimitTests(unittest.TestCase):
     def test_deepseek_asks_for_its_longest_replies(self):
-        deepseek = create_model(PROVIDERS["deepseek"], "key", "deepseek-chat")
+        deepseek = create_model(PROVIDERS["deepseek"], "key", "deepseek-v4-pro")
         gemini = create_model(PROVIDERS["gemini"], "key", "g")
-        self.assertEqual(deepseek._max_tokens, 8192)
+        self.assertEqual(deepseek._max_tokens, 32768)
         self.assertIsNone(gemini._max_tokens)
         recorder = SimpleNamespace(requests=[])
         deepseek._client = SimpleNamespace(
@@ -149,7 +149,7 @@ class OutputLimitTests(unittest.TestCase):
         )
         with self.assertRaises(ZeroDivisionError):
             deepseek._create(messages=[])
-        self.assertEqual(recorder.requests[0]["max_tokens"], 8192)
+        self.assertEqual(recorder.requests[0]["max_tokens"], 32768)
 
 
 if __name__ == "__main__":
